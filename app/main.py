@@ -16,7 +16,8 @@ app = FastAPI()
 origins = [
     "http://192.168.10.102:3000",  # フロントエンドのURL（環境に合わせて調整）
     "http://127.0.0.1:3000",
-    "http://localhost:3000"
+    "http://localhost:3000",
+    "https://tech0-techbrain-front-bhh0bjenh5caguch.francecentral-01.azurewebsites.net"
 ]
 
 app.add_middleware(
