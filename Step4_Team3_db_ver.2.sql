@@ -19,6 +19,10 @@ CREATE TABLE users (
     INDEX idx_email (email)                    -- メールアドレスでの検索を高速化
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+ALTER TABLE users
+ADD COLUMN photoURL VARCHAR(255) NULL;         -- ユーザーのプロフィール画像のURL
+
+
 -- FamilyGroups（家族グループテーブル）
 -- 家族単位でのグループを管理するテーブル
 CREATE TABLE family_groups (
