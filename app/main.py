@@ -1,11 +1,15 @@
 # app/main.py
-from fastapi import FastAPI, Depends, HTTPException, status
+import os
+import uuid
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import timedelta
 
+from azure.storage.blob import BlobServiceClient, ContentSettings
+
 from app.models import User
-from app.schemas import UserCreate, UserOut, UserLogin, Token
+from app.schemas import UserCreate, UserOut, UserLogin, Token  # ※ UserCreate は従来のJSON用（今回はフォーム版を使用）
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
@@ -14,12 +18,11 @@ app = FastAPI()
 
 # CORS 設定
 origins = [
-    "http://192.168.10.102:3000",  # フロントエンドのURL（環境に合わせて調整）
+    "http://192.168.10.102:3000",  
     "http://127.0.0.1:3000",
     "http://localhost:3000",
     "https://tech0-techbrain-front-bhh0bjenh5caguch.francecentral-01.azurewebsites.net"
 ]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -32,23 +35,56 @@ app.add_middleware(
 def read_root():
     return {"message": "Hello from meme mori backend!"}
 
-# 会員登録→signup エンドポイントに名称変更
+# 従来のsignupエンドポイントを、JSON入力からフォーム入力に変更し、画像アップロード機能を追加
 @app.post("/signup", response_model=UserOut)
-def signup(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter((User.username == user.username) | (User.email == user.email)).first()
+async def signup(
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    photo: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    # ユーザー重複チェック
+    db_user = db.query(User).filter((User.username == username) | (User.email == email)).first()
     if db_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="ユーザー名またはメールアドレスは既に登録されています"
         )
-    hashed_password = get_password_hash(user.password)
-    new_user = User(username=user.username, email=user.email, password_hash=hashed_password)
+
+    # 画像がアップロードされていればAzure Blob Storageにアップロード
+    photo_url = None
+    if photo:
+        try:
+            connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+            container_name = os.getenv("AZURE_CONTAINER_NAME")
+            if not connection_string or not container_name:
+                raise HTTPException(status_code=500, detail="Azure Blob Storage の設定が不十分です")
+            blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+            container_client = blob_service_client.get_container_client(container_name)
+            # 一意なファイル名を生成（元の拡張子を維持）
+            file_extension = photo.filename.split(".")[-1]
+            unique_filename = f"{uuid.uuid4()}.{file_extension}"
+            blob_client = container_client.get_blob_client(unique_filename)
+            # コンテンツタイプを指定
+            content_settings = ContentSettings(content_type=photo.content_type)
+            # アップロード（非同期版を使う場合は await photo.read() など）
+            file_data = await photo.read()
+            blob_client.upload_blob(file_data, overwrite=True, content_settings=content_settings)
+            # アップロード後のURLを取得（このURLがそのまま公開されるかは、コンテナのアクセス権限によります）
+            photo_url = blob_client.url
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"画像アップロードに失敗しました: {e}")
+
+    # パスワードハッシュ生成とユーザー作成
+    hashed_password = get_password_hash(password)
+    new_user = User(username=username, email=email, password_hash=hashed_password, photoURL=photo_url)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
     return new_user
 
-# ログインはメールアドレスとパスワードを使用する
+# ログインエンドポイント（メールアドレスとパスワード）
 @app.post("/login", response_model=Token)
 def login(user: UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.email == user.email).first()
