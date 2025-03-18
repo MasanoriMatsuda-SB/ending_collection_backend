@@ -30,18 +30,17 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello, Ending Collection Backend!"}
+    return {"message": "Hello from meme mori backend!"}
 
-@app.post("/register", response_model=UserOut)
-def register(user: UserCreate, db: Session = Depends(get_db)):
-    # ユーザー名またはメールの重複チェック
+# 会員登録→signup エンドポイントに名称変更
+@app.post("/signup", response_model=UserOut)
+def signup(user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter((User.username == user.username) | (User.email == user.email)).first()
     if db_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="ユーザー名またはメールアドレスは既に登録されています"
         )
-    # パスワードのハッシュ化
     hashed_password = get_password_hash(user.password)
     new_user = User(username=user.username, email=user.email, password_hash=hashed_password)
     db.add(new_user)
@@ -49,9 +48,9 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
     return new_user
 
+# ログインはメールアドレスとパスワードを使用する
 @app.post("/login", response_model=Token)
 def login(user: UserLogin, db: Session = Depends(get_db)):
-    # email を使ってユーザー情報を取得
     db_user = db.query(User).filter(User.email == user.email).first()
     if not db_user or not verify_password(user.password, db_user.password_hash):
         raise HTTPException(
