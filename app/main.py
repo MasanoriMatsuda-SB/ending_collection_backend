@@ -122,8 +122,9 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
             detail="認証情報が無効です"
         )
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # ユーザーのphotoURLもトークンに含める
     access_token = create_access_token(
-        data={"sub": db_user.username},
+        data={"sub": db_user.username, "photoURL": db_user.photoURL},
         expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
