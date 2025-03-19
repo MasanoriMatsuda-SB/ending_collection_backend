@@ -8,5 +8,6 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     username = Column(String(100), nullable=False)
+    photoURL = Column(String(255), nullable=True)  # ユーザーのプロフィール画像のURLを保存
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
