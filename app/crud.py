@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
-from models import Message
-from schemas import MessageCreate
+from app.models import Message
+from app.schemas import MessageCreate
 
 def create_message(db: Session, message: MessageCreate):
     new_message = Message(**message.dict())
