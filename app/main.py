@@ -16,6 +16,9 @@ from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
 
+from schemas import MessageCreate, MessageResponse
+from crud import create_message, get_messages
+
 # ロギングの設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("meme_mori_backend")
@@ -133,6 +136,20 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+# メッセージ取得エンドポイント
+@app.get("/messages", response_model=list[MessageResponse])
+def read_messages(db: Session = Depends(get_db)):
+    logger.info("メッセージ取得リクエスト")
+    return get_messages(db)
+
+# メッセージ投稿エンドポイント
+@app.post("/messages", response_model=MessageResponse)
+def post_message(message: MessageCreate, db: Session = Depends(get_db)):
+    logger.info(f"メッセージ投稿: {message.dict()}")
+    return create_message(db, message)
+
+
 
 if __name__ == "__main__":
     import uvicorn
