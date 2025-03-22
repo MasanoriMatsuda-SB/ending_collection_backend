@@ -124,7 +124,12 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     # ユーザーのphotoURLもトークンに含める
     access_token = create_access_token(
-        data={"sub": db_user.username, "photoURL": db_user.photoURL},
+        data={
+            "sub": db_user.username, 
+            "user_id": db_user.user_id,
+            "email":db_user.email,
+            "photoURL": db_user.photoURL
+        },
         expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
