@@ -28,9 +28,14 @@ class MessageCreate(BaseModel):
     text: str
     uid: int
 
-class MessageResponse(MessageCreate):
-    id: int
+class MessageResponse(BaseModel):
+    message_id: int
+    thread_id: int
+    user_id: int
+    content: str
     created_at: datetime
+    username: str
+    photoURL: str | None = None
 
     class Config:
         from_attributes = True
