@@ -21,6 +21,7 @@ class Message(Base):
     message_id = Column(Integer, primary_key=True)
     thread_id = Column(Integer, ForeignKey("threads.thread_id"))
     user_id = Column(Integer, ForeignKey("users.user_id"))
+    parent_message_id = Column(Integer,nullable=True)
     content = Column(Text, nullable=False)
     created_at = Column(TIMESTAMP, default=func.now())
     updated_at = Column(TIMESTAMP, default=func.now(), onupdate=func.now())

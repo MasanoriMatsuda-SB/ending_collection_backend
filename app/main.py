@@ -16,8 +16,8 @@ from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
 
-from schemas import MessageCreate, MessageResponse
-from crud import create_message, get_messages
+from app.schemas import MessageCreate, MessageResponse
+from app.crud import create_message, get_messages
 
 # ロギングの設定
 logging.basicConfig(level=logging.INFO)
