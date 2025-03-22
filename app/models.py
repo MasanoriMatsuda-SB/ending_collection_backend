@@ -14,6 +14,14 @@ class User(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
 
+class Thread(Base):
+    __tablename__ = "threads"
+
+    thread_id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(Integer, nullable=False)
+    title = Column(String(255), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
 class Message(Base):
     __tablename__ = "messages"
@@ -23,8 +31,8 @@ class Message(Base):
     user_id = Column(Integer, ForeignKey("users.user_id"))
     parent_message_id = Column(Integer,nullable=True)
     content = Column(Text, nullable=False)
-    created_at = Column(TIMESTAMP, default=func.now())
-    updated_at = Column(TIMESTAMP, default=func.now(), onupdate=func.now())
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     is_edited = Column(Boolean, default=False)
 
     user = relationship("User", backref="messages")

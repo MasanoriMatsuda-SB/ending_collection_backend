@@ -10,7 +10,7 @@ import logging
 
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
-from app.models import User
+from app.models import User, Thread, Message
 from app.schemas import UserCreate, UserOut, UserLogin, Token
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -137,11 +137,42 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
+
+# item_id から thread_id への変換
+@app.get("/threads/by-item/{item_id}")
+def get_thread_by_item(item_id: int, db: Session = Depends(get_db)):
+    thread = db.query(Thread).filter(Thread.item_id == item_id).first()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"thread_id": thread.thread_id}
+
 # メッセージ取得エンドポイント
 @app.get("/messages", response_model=list[MessageResponse])
-def read_messages(db: Session = Depends(get_db)):
-    logger.info("メッセージ取得リクエスト")
-    return get_messages(db)
+def read_messages(thread_id: int, db: Session = Depends(get_db)):
+    logger.info(f"メッセージ取得 thread_id={thread_id}")
+
+    messages = (
+        db.query(Message)
+        .join(User, Message.user_id == User.user_id)
+        .filter(Message.thread_id == thread_id)
+        .order_by(Message.created_at)
+        .all()
+    )
+
+    result = []
+    for m in messages:
+        result.append(
+            MessageResponse(
+                message_id=m.message_id,
+                thread_id=m.thread_id,
+                user_id=m.user_id,
+                content=m.content,
+                created_at=m.created_at,
+                username=m.user.username,
+                photoURL=m.user.photoURL,
+            )
+        )
+    return result
 
 # メッセージ投稿エンドポイント
 @app.post("/messages", response_model=MessageResponse)
