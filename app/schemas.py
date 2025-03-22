@@ -1,5 +1,6 @@
 # app/schemas.py
 from pydantic import BaseModel, EmailStr
+from datetime import datetime
 
 class UserCreate(BaseModel):
     username: str
@@ -21,3 +22,17 @@ class UserOut(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+# ====== Chat関連Schema（Start） ====== 
+class MessageCreate(BaseModel):
+    text: str
+    uid: int
+
+class MessageResponse(MessageCreate):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# ====== Chat関連Schema（EndEnd）====== 
