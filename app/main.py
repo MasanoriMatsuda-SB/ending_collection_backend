@@ -57,7 +57,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 def read_root():
     return {"message": "Hello from meme mori backend with Socket.IO!"}
 
-# 🔧 Socket.IO イベント定義
+# Socket.IO イベント定義
 @sio.event
 async def connect(sid, environ):
     logger.info(f"Socket connected: {sid}")
