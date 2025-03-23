@@ -1,37 +1,42 @@
-# app/main.py
 import os
 import uuid
+import logging
+from datetime import timedelta
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from datetime import timedelta
-import logging
-
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
 from app.models import User, Thread, Message
-from app.schemas import UserCreate, UserOut, UserLogin, Token, MessageCreate, MessageResponse
+from app.schemas import (
+    UserCreate, UserOut, UserLogin, Token,
+    MessageCreate, MessageResponse
+)
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
-
 from app.crud import create_message, get_messages
 
-# ロギングの設定
+import socketio  # 🔧 Socket.IO
+
+# ロギング設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("meme_mori_backend")
 
-app = FastAPI()
+# 🔧 Socket.IO サーバー作成
+sio = socketio.AsyncServer(cors_allowed_origins="*", async_mode="asgi")
+fastapi_app = FastAPI()
+app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)  # 🔧 FastAPI + SocketIOを結合
 
-# CORS 設定
+# CORS設定
 origins = [
-    "http://192.168.10.102:3000",  
+    "http://192.168.10.102:3000",
     "http://127.0.0.1:3000",
     "http://localhost:3000",
     "https://tech0-techbrain-front-bhh0bjenh5caguch.francecentral-01.azurewebsites.net"
 ]
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
@@ -39,22 +44,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# グローバル例外ハンドラーの追加
-@app.exception_handler(Exception)
+# グローバル例外ハンドラー
+@fastapi_app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled error: {exc}")
-    # 例外内容をJSONとして返す
     return JSONResponse(
         status_code=500,
         content={"detail": f"Internal Server Error: {exc}"}
     )
 
-@app.get("/")
+@fastapi_app.get("/")
 def read_root():
-    return {"message": "Hello from meme mori backend!"}
+    return {"message": "Hello from meme mori backend with Socket.IO!"}
 
-# signup エンドポイント（フォームデータおよび画像アップロード対応）
-@app.post("/signup", response_model=UserOut)
+# 🔧 Socket.IO イベント定義
+@sio.event
+async def connect(sid, environ):
+    logger.info(f"Socket connected: {sid}")
+
+@sio.event
+async def disconnect(sid):
+    logger.info(f"Socket disconnected: {sid}")
+
+@sio.event
+async def send_message(sid, data):
+    logger.info(f"Message from {sid}: {data}")
+    await sio.emit("receive_message", data)
+
+# サインアップ
+@fastapi_app.post("/signup", response_model=UserOut)
 async def signup(
     username: str = Form(...),
     email: str = Form(...),
@@ -63,15 +81,10 @@ async def signup(
     db: Session = Depends(get_db)
 ):
     try:
-        # ユーザー重複チェック
         db_user = db.query(User).filter((User.username == username) | (User.email == email)).first()
         if db_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ユーザー名またはメールアドレスは既に登録されています"
-            )
+            raise HTTPException(status_code=400, detail="ユーザー名またはメールアドレスは既に登録されています")
 
-        # 画像がアップロードされ、かつファイル名がある場合のみアップロード処理を実行
         photo_url = None
         if photo and photo.filename:
             try:
@@ -81,75 +94,60 @@ async def signup(
                     raise HTTPException(status_code=500, detail="Azure Blob Storage の設定が不十分です")
                 blob_service_client = BlobServiceClient.from_connection_string(connection_string)
                 container_client = blob_service_client.get_container_client(container_name)
-                # ファイル名に拡張子があるかチェック
-                if "." in photo.filename:
-                    file_extension = photo.filename.split(".")[-1]
-                    unique_filename = f"{uuid.uuid4()}.{file_extension}"
-                else:
-                    unique_filename = str(uuid.uuid4())
+
+                file_extension = photo.filename.split(".")[-1] if "." in photo.filename else ""
+                unique_filename = f"{uuid.uuid4()}.{file_extension}" if file_extension else str(uuid.uuid4())
                 blob_client = container_client.get_blob_client(unique_filename)
                 content_settings = ContentSettings(content_type=photo.content_type)
                 file_data = await photo.read()
                 blob_client.upload_blob(file_data, overwrite=True, content_settings=content_settings)
                 photo_url = blob_client.url
-                logger.info(f"Image uploaded successfully: {photo_url}")
+                logger.info(f"Image uploaded: {photo_url}")
             except Exception as e:
                 logger.error(f"Image upload failed: {e}")
                 raise HTTPException(status_code=500, detail=f"画像アップロードに失敗しました: {e}")
 
-        # ユーザー作成
         hashed_password = get_password_hash(password)
-        new_user = User(
-            username=username,
-            email=email,
-            password_hash=hashed_password,
-            photoURL=photo_url
-        )
+        new_user = User(username=username, email=email, password_hash=hashed_password, photoURL=photo_url)
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
         return new_user
-
     except Exception as e:
         logger.error(f"Signup failed: {e}")
         raise
 
-# ログインエンドポイント（メールアドレスとパスワード）
-@app.post("/login", response_model=Token)
+# ログイン
+@fastapi_app.post("/login", response_model=Token)
 def login(user: UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.email == user.email).first()
     if not db_user or not verify_password(user.password, db_user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="認証情報が無効です"
-        )
+        raise HTTPException(status_code=401, detail="認証情報が無効です")
+
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    # ユーザーのphotoURLもトークンに含める
     access_token = create_access_token(
         data={
-            "sub": db_user.username, 
+            "sub": db_user.username,
             "user_id": db_user.user_id,
-            "email":db_user.email,
+            "email": db_user.email,
             "photoURL": db_user.photoURL
         },
         expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-
-# item_id から thread_id への変換
-@app.get("/threads/by-item/{item_id}")
+# item_id → thread_id
+@fastapi_app.get("/threads/by-item/{item_id}")
 def get_thread_by_item(item_id: int, db: Session = Depends(get_db)):
     thread = db.query(Thread).filter(Thread.item_id == item_id).first()
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
     return {"thread_id": thread.thread_id}
 
-# メッセージ取得エンドポイント
-@app.get("/messages", response_model=list[MessageResponse])
+# メッセージ取得
+@fastapi_app.get("/messages", response_model=list[MessageResponse])
 def read_messages(thread_id: int, db: Session = Depends(get_db)):
     logger.info(f"メッセージ取得 thread_id={thread_id}")
-
     messages = (
         db.query(Message)
         .join(User, Message.user_id == User.user_id)
@@ -158,30 +156,28 @@ def read_messages(thread_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
-    result = []
-    for m in messages:
-        result.append(
-            MessageResponse(
-                message_id=m.message_id,
-                thread_id=m.thread_id,
-                user_id=m.user_id,
-                content=m.content,
-                created_at=m.created_at,
-                username=m.user.username,
-                photoURL=m.user.photoURL,
-            )
+    return [
+        MessageResponse(
+            message_id=m.message_id,
+            thread_id=m.thread_id,
+            user_id=m.user_id,
+            content=m.content,
+            created_at=m.created_at,
+            username=m.user.username,
+            photoURL=m.user.photoURL,
         )
-    return result
+        for m in messages
+    ]
 
-# メッセージ投稿エンドポイント
-@app.post("/messages", response_model=MessageResponse)
+# メッセージ投稿
+@fastapi_app.post("/messages", response_model=MessageResponse)
 def post_message(message: MessageCreate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.user_id == message.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     new_msg = create_message(db, message)
-    return MessageResponse(
+    response = MessageResponse(
         message_id=new_msg.message_id,
         thread_id=new_msg.thread_id,
         user_id=new_msg.user_id,
@@ -190,8 +186,10 @@ def post_message(message: MessageCreate, db: Session = Depends(get_db)):
         username=user.username,
         photoURL=user.photoURL
     )
+    return response
 
 
+# 🔧 起動ポイント変更
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
