@@ -11,12 +11,11 @@ import logging
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
 from app.models import User, Thread, Message
-from app.schemas import UserCreate, UserOut, UserLogin, Token
+from app.schemas import UserCreate, UserOut, UserLogin, Token, MessageCreate, MessageResponse
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
 
-from app.schemas import MessageCreate, MessageResponse
 from app.crud import create_message, get_messages
 
 # ロギングの設定
@@ -177,9 +176,20 @@ def read_messages(thread_id: int, db: Session = Depends(get_db)):
 # メッセージ投稿エンドポイント
 @app.post("/messages", response_model=MessageResponse)
 def post_message(message: MessageCreate, db: Session = Depends(get_db)):
-    logger.info(f"メッセージ投稿: {message.dict()}")
-    return create_message(db, message)
+    user = db.query(User).filter(User.user_id == message.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
+    new_msg = create_message(db, message)
+    return MessageResponse(
+        message_id=new_msg.message_id,
+        thread_id=new_msg.thread_id,
+        user_id=new_msg.user_id,
+        content=new_msg.content,
+        created_at=new_msg.created_at,
+        username=user.username,
+        photoURL=user.photoURL
+    )
 
 
 if __name__ == "__main__":
