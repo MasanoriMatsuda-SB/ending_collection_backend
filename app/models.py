@@ -37,6 +37,7 @@ class Message(Base):
     is_edited = Column(Boolean, default=False)
 
     user = relationship("User", backref="messages")
+    attachments = relationship("MessageAttachment", back_populates="message") 
 
 
 # Attachments対応
