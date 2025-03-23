@@ -11,7 +11,7 @@ from azure.storage.blob import BlobServiceClient, ContentSettings
 from app.models import User, Thread, Message
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
-    MessageCreate, MessageResponse
+    MessageCreate, MessageResponse, AttachmentType, MessageAttachmentBase, MessageAttachmentCreate, MessageAttachment
 )
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -187,6 +187,65 @@ def post_message(message: MessageCreate, db: Session = Depends(get_db)):
         photoURL=user.photoURL
     )
     return response
+
+# メッセージの添付ファイル対応
+@fastapi_app.post("/message_attachments", response_model=MessageAttachment)
+async def upload_attachment(
+    message_id: int = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="ファイルが指定されていません")
+
+        # MIMEタイプから attachment_type 判定
+        content_type = file.content_type or "application/octet-stream"
+        if content_type.startswith("image/"):
+            attachment_type = AttachmentType.image
+        elif content_type.startswith("audio/"):
+            attachment_type = AttachmentType.voice
+        elif content_type.startswith("video/"):
+            attachment_type = AttachmentType.video
+        else:
+            attachment_type = AttachmentType.file
+
+        # Azure Blob Storage にアップロード
+        connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        container_name = "message-attachments"  # ← こちらは、環境変数ではなく固定にしてます（適宜全体感と合わせて調整）
+
+        if not connection_string:
+            raise HTTPException(status_code=500, detail="Azure Storage 接続情報が設定されていません")
+
+        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        container_client = blob_service_client.get_container_client(container_name)
+
+        file_extension = file.filename.split(".")[-1] if "." in file.filename else ""
+        unique_filename = f"{uuid.uuid4()}.{file_extension}" if file_extension else str(uuid.uuid4())
+        blob_client = container_client.get_blob_client(unique_filename)
+
+        content_settings = ContentSettings(content_type=content_type)
+        file_data = await file.read()
+        blob_client.upload_blob(file_data, overwrite=True, content_settings=content_settings)
+
+        attachment_url = blob_client.url
+        logger.info(f"ファイルをアップロードしました: {attachment_url}")
+
+        # DBに保存
+        attachment = MessageAttachment(
+            message_id=message_id,
+            attachment_type=attachment_type,
+            attachment_url=attachment_url,
+        )
+        db.add(attachment)
+        db.commit()
+        db.refresh(attachment)
+
+        return attachment
+
+    except Exception as e:
+        logger.error(f"添付ファイルアップロード失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"アップロードエラー: {e}")
 
 
 #  起動ポイント変更
