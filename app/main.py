@@ -18,13 +18,13 @@ from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
 from app.crud import create_message, get_messages
 
-import socketio  # 🔧 Socket.IO
+import socketio  #  Socket.IO
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("meme_mori_backend")
 
-# 🔧 Socket.IO サーバー作成
+#  Socket.IO サーバー作成
 sio = socketio.AsyncServer(cors_allowed_origins="*", async_mode="asgi")
 fastapi_app = FastAPI()
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)  # 🔧 FastAPI + SocketIOを結合
@@ -189,7 +189,7 @@ def post_message(message: MessageCreate, db: Session = Depends(get_db)):
     return response
 
 
-# 🔧 起動ポイント変更
+#  起動ポイント変更
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
