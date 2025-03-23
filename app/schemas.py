@@ -2,6 +2,10 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 
+from typing import Optional
+from enum import Enum
+
+
 class UserCreate(BaseModel):
     username: str
     email: EmailStr
@@ -42,3 +46,27 @@ class MessageResponse(BaseModel):
         from_attributes = True
 
 # ====== Chat関連Schema（EndEnd）====== 
+
+# ====== ChatAttachment関連Schema（Start） ====== 
+class AttachmentType(str, Enum):
+    image = "image"
+    voice = "voice"
+    video = "video"
+    file = "file"
+
+class MessageAttachmentBase(BaseModel):
+    message_id: int
+    attachment_url: Optional[str] = None
+    attachment_type: AttachmentType
+
+class MessageAttachmentCreate(MessageAttachmentBase):
+    pass
+
+class MessageAttachment(MessageAttachmentBase):
+    attachment_id: int
+    uploaded_at: datetime
+
+    class Config:
+        orm_mode = True
+        
+# ====== ChatAttachment関連Schema（End） ====== 
