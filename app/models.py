@@ -3,6 +3,7 @@ from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, Boolean, Foreig
 from app.db import Base
 from sqlalchemy.orm import relationship
 from enum import Enum
+import enum
 
 class User(Base):
     __tablename__ = "users"  # 既存のテーブル名と一致させる
@@ -37,22 +38,23 @@ class Message(Base):
     is_edited = Column(Boolean, default=False)
 
     user = relationship("User", backref="messages")
+    attachments = relationship("MessageAttachment", back_populates="message") 
 
 
 # Attachments対応
-class AttachmentType(str, Enum):
-    image = "image"
-    voice = "voice"
-    video = "video"
-    file = "file"
+# class AttachmentType(str, enum.Enum):
+#     image = "image"
+#     voice = "voice"
+#     video = "video"
+#     file = "file"
 
-class MessageAttachment(Base):
-    __tablename__ = "message_attachments"
+# class MessageAttachment(Base):
+#     __tablename__ = "message_attachments"
 
-    attachment_id = Column(Integer, primary_key=True, index=True)
-    message_id = Column(Integer, ForeignKey("messages.message_id"), nullable=False)
-    attachment_url = Column(String(255), nullable=True)
-    attachment_type = Column(Enum(AttachmentType), nullable=False)
-    uploaded_at = Column(TIMESTAMP, server_default=func.now())
+#     attachment_id = Column(Integer, primary_key=True, index=True)
+#     message_id = Column(Integer, ForeignKey("messages.message_id"), nullable=False)
+#     attachment_url = Column(String(255), nullable=True)
+#     attachment_type = Column(Enum(AttachmentType), nullable=False)
+#     uploaded_at = Column(TIMESTAMP, server_default=func.now())
 
-    message = relationship("Message", back_populates="attachments")
+#     message = relationship("Message", back_populates="attachments")
