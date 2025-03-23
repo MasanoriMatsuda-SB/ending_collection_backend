@@ -25,8 +25,9 @@ class Token(BaseModel):
 
 # ====== Chat関連Schema（Start） ====== 
 class MessageCreate(BaseModel):
-    text: str
-    uid: int
+    thread_id: int
+    user_id: int
+    content: str
 
 class MessageResponse(BaseModel):
     message_id: int
