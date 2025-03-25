@@ -8,10 +8,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
-from app.models import User, Thread, Message
+from app.models import User, Thread, Message, MessageAttachment
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
-    MessageCreate, MessageResponse, AttachmentType, MessageAttachmentBase, MessageAttachmentCreate, MessageAttachment
+    MessageCreate, MessageResponse, AttachmentType, MessageAttachmentBase, MessageAttachmentCreate, MessageAttachment as MessageAttachmentSchema
 )
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -189,7 +189,7 @@ def post_message(message: MessageCreate, db: Session = Depends(get_db)):
     return response
 
 # メッセージの添付ファイル対応
-@fastapi_app.post("/message_attachments", response_model=MessageAttachment)
+@fastapi_app.post("/message_attachments", response_model=MessageAttachmentSchema)
 async def upload_attachment(
     message_id: int = Form(...),
     file: UploadFile = File(...),
@@ -237,9 +237,15 @@ async def upload_attachment(
             attachment_type=attachment_type,
             attachment_url=attachment_url,
         )
-        db.add(attachment)
-        db.commit()
-        db.refresh(attachment)
+        
+        try:
+            db.add(attachment)
+            db.commit()
+            db.refresh(attachment)
+            logger.info(f"DB登録成功: attachment_id={attachment.attachment_id}")
+        except Exception as db_err:
+            logger.error(f"DB保存中にエラー: {db_err}")
+            raise HTTPException(status_code=500, detail=f"DB保存に失敗しました: {db_err}")
 
         return attachment
 
