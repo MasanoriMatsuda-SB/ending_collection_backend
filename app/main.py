@@ -253,6 +253,16 @@ async def upload_attachment(
         logger.error(f"添付ファイルアップロード失敗: {e}")
         raise HTTPException(status_code=500, detail=f"アップロードエラー: {e}")
 
+@fastapi_app.get("/attachments/by-message/{message_id}", response_model=list[MessageAttachmentSchema])
+def get_attachments_by_message_id(message_id: int, db: Session = Depends(get_db)):
+    attachments = (
+        db.query(MessageAttachment)
+        .filter(MessageAttachment.message_id == message_id)
+        .order_by(MessageAttachment.uploaded_at)
+        .all()
+    )
+    return attachments
+
 
 #  起動ポイント変更
 if __name__ == "__main__":
