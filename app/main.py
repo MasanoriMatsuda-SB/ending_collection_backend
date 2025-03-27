@@ -15,6 +15,7 @@ from app.schemas import UserCreate, UserOut, UserLogin, Token
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
+from app.schemas import GroupCreate  # ← モックサーバー用追加
 
 # ロギングの設定
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +25,7 @@ app = FastAPI()
 
 # CORS 設定
 origins = [
-    "http://192.168.10.102:3000",  
+    "http://192.168.10.102:3000",
     "http://127.0.0.1:3000",
     "http://localhost:3000",
     "https://tech0-techbrain-front-bhh0bjenh5caguch.francecentral-01.azurewebsites.net"
@@ -62,6 +63,7 @@ async def signup(
 ):
     try:
         # ユーザー重複チェック
+        # 名前の重複は除外してよさそう
         db_user = db.query(User).filter((User.username == username) | (User.email == email)).first()
         if db_user:
             raise HTTPException(
@@ -133,6 +135,13 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+# モックサーバー
+# 仮のグループ作成エンドポイント（モック）
+@app.post("/grouping")
+async def mock_create_group(payload: GroupCreate):
+    group_name = payload.groupName
+    return {"message": f"グループ '{group_name}' を作成しました"}
 
 if __name__ == "__main__":
     import uvicorn

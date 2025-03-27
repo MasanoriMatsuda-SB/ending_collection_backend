@@ -21,3 +21,7 @@ class UserOut(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+# モックサーバー用に追加
+class GroupCreate(BaseModel):
+    groupName: str
