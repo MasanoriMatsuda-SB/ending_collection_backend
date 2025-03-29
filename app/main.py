@@ -16,7 +16,7 @@ from app.schemas import (
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
-from app.crud import create_message, get_messages
+from app.crud import create_message, get_messages, delete_message
 
 import socketio  #  Socket.IO
 
@@ -27,7 +27,7 @@ logger = logging.getLogger("meme_mori_backend")
 #  Socket.IO サーバー作成
 sio = socketio.AsyncServer(cors_allowed_origins="*", async_mode="asgi")
 fastapi_app = FastAPI()
-app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)  # 🔧 FastAPI + SocketIOを結合
+app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)  # FastAPI + SocketIOを結合
 
 # CORS設定
 origins = [
@@ -263,6 +263,12 @@ def get_attachments_by_message_id(message_id: int, db: Session = Depends(get_db)
     )
     return attachments
 
+@fastapi_app.delete("/messages/{message_id}")
+def delete_message_endpoint(message_id: int, db: Session = Depends(get_db)):
+    message = delete_message(db, message_id)
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"detail": "Message deleted"}
 
 #  起動ポイント変更
 if __name__ == "__main__":
