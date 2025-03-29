@@ -11,3 +11,10 @@ def create_message(db: Session, message: MessageCreate):
 
 def get_messages(db: Session, limit: int = 50):
     return db.query(Message).order_by(Message.created_at.desc()).limit(limit).all()
+
+def delete_message(db: Session, message_id: int):
+    message = db.query(Message).filter(Message.message_id == message_id).first()
+    if message:
+        db.delete(message)
+        db.commit()
+    return message
