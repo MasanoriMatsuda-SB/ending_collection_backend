@@ -11,14 +11,16 @@ from azure.storage.blob import BlobServiceClient, ContentSettings
 from app.models import User, Thread, Message, MessageAttachment
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
-    MessageCreate, MessageResponse, AttachmentType, MessageAttachmentBase, MessageAttachmentCreate, MessageAttachment as MessageAttachmentSchema
+    MessageCreate, MessageResponse, AttachmentType, MessageAttachmentBase, MessageAttachmentCreate, MessageAttachment as MessageAttachmentSchema, MessageReaction, MessageReactionCreate
 )
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
-from app.crud import create_message, get_messages, delete_message
+from app.crud import create_message, get_messages, delete_message, create_reaction, get_reactions_by_message, delete_reaction
 
 import socketio  #  Socket.IO
+
+from typing import List
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -70,6 +72,31 @@ async def disconnect(sid):
 async def send_message(sid, data):
     logger.info(f"Message from {sid}: {data}")
     await sio.emit("receive_message", data)
+
+# リアクション対応
+@sio.on("add_reaction")
+async def handle_add_reaction(sid, data):
+    """
+    data: {
+        "message_id": int,
+        "user_id": int,
+        "reaction_type": str
+    }
+    """
+    logger.info(f"リアクション追加: {data}")
+    await sio.emit("reaction_added", data)
+
+@sio.on("remove_reaction")
+async def handle_remove_reaction(sid, data):
+    """
+    data: {
+        "message_id": int,
+        "user_id": int
+    }
+    """
+    logger.info(f"リアクション削除: {data}")
+    await sio.emit("reaction_removed", data)
+
 
 # サインアップ
 @fastapi_app.post("/signup", response_model=UserOut)
@@ -270,6 +297,32 @@ def delete_message_endpoint(message_id: int, db: Session = Depends(get_db)):
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
     return {"detail": "Message deleted"}
+
+
+# ====== Chat リアクション対応（Start） ====== 
+@fastapi_app.post("/reactions", response_model=MessageReaction)
+def add_reaction(
+    reaction: MessageReactionCreate,
+    db: Session = Depends(get_db)
+):
+    return create_reaction(db, reaction)
+
+
+@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReaction])
+def get_reactions(message_id: int, db: Session = Depends(get_db)):
+    return get_reactions_by_message(db, message_id)
+
+
+@fastapi_app.delete("/reactions")
+def remove_reaction(
+    message_id: int,
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    delete_reaction(db, message_id, user_id)
+    return {"message": "Reaction removed"}
+# ====== Chat リアクション対応（EndEnd） ====== 
+
 
 #  起動ポイント変更
 if __name__ == "__main__":
