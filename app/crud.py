@@ -13,15 +13,6 @@ def create_message(db: Session, message: MessageCreate):
 def get_messages(db: Session, limit: int = 50):
     return db.query(Message).order_by(Message.created_at.desc()).limit(limit).all()
 
-# def delete_message(db: Session, message_id: int):
-#     db.query(MessageAttachment).filter(MessageAttachment.message_id == message_id).delete
-#     message = db.query(Message).filter(Message.message_id == message_id).first()
-#     if message:
-#         db.delete(message)
-#         db.commit()
-#     return message
-
-
 def delete_message(db: Session, message_id: int):
     # 添付ファイルを取得してBlob削除
     attachments = db.query(MessageAttachment).filter(MessageAttachment.message_id == message_id).all()
