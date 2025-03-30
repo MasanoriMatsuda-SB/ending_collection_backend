@@ -165,6 +165,7 @@ def read_messages(thread_id: int, db: Session = Depends(get_db)):
             created_at=m.created_at,
             username=m.user.username,
             photoURL=m.user.photoURL,
+            parent_message_id=m.parent_message_id
         )
         for m in messages
     ]
