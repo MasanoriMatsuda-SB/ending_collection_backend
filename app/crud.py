@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
-from app.models import Message, MessageAttachment
-from app.schemas import MessageCreate
+from app.models import Message, MessageAttachment, MessageReaction
+from app.schemas import MessageCreate, MessageReactionCreate
 from app.services.blob import delete_blob_by_url
 
 def create_message(db: Session, message: MessageCreate):
@@ -33,3 +33,24 @@ def delete_message(db: Session, message_id: int):
 
     return message
 
+
+# ====== ChatReaction関連CRUD（Start） ====== 
+def create_reaction(db: Session, reaction: MessageReactionCreate):
+    db_reaction = MessageReaction(**reaction.dict())
+    db.add(db_reaction)
+    db.commit()
+    db.refresh(db_reaction)
+    return db_reaction
+
+def get_reactions_by_message(db: Session, message_id: int):
+    return db.query(MessageReaction).filter(
+        MessageReaction.message_id == message_id
+    ).all()
+
+def delete_reaction(db: Session, message_id: int, user_id: int):
+    db.query(MessageReaction).filter(
+        MessageReaction.message_id == message_id,
+        MessageReaction.user_id == user_id
+    ).delete()
+    db.commit()
+# ====== ChatReaction関連CRUD（End） ====== 

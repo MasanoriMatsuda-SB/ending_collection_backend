@@ -2,7 +2,7 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 
-from typing import Optional
+from typing import Optional, Literal
 from enum import Enum
 
 
@@ -71,4 +71,22 @@ class MessageAttachment(MessageAttachmentBase):
     class Config:
         orm_mode = True
         
+# ====== ChatAttachment関連Schema（End） ====== 
+
+# ====== ChatReaction関連Schema（Start） ====== 
+class MessageReactionBase(BaseModel):
+    message_id: int
+    user_id: int
+    reaction_type: Literal["like", "heart", "smile", "sad", "agree"]
+
+class MessageReactionCreate(MessageReactionBase):
+    pass
+
+class MessageReaction(MessageReactionBase):
+    reaction_id: int
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
 # ====== ChatAttachment関連Schema（End） ====== 
