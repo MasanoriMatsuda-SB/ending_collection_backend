@@ -32,6 +32,7 @@ class MessageCreate(BaseModel):
     thread_id: int
     user_id: int
     content: str
+    parent_message_id: Optional[int] = None
 
 class MessageResponse(BaseModel):
     message_id: int
