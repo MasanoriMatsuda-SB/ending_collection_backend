@@ -42,6 +42,7 @@ class MessageResponse(BaseModel):
     created_at: datetime
     username: str
     photoURL: str | None = None
+    parent_message_id: Optional[int] = None
 
     class Config:
         from_attributes = True
