@@ -58,3 +58,16 @@ class MessageAttachment(Base):
     uploaded_at = Column(TIMESTAMP, server_default=func.now())
 
     message = relationship("Message", back_populates="attachments")
+    
+# リアクション対応
+class MessageReaction(Base):
+    __tablename__ = "message_reactions"
+
+    reaction_id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("messages.message_id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    reaction_type = Column(
+        SqlEnum("like", "heart", "smile", "sad", "agree", name="reaction_type_enum"),
+        nullable=False
+    )
+    created_at = Column(TIMESTAMP, server_default=func.now())
