@@ -1,6 +1,7 @@
 # app/db.py
 import os
 import urllib.parse
+import ssl
 from os.path import join, exists, dirname
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -15,7 +16,7 @@ DB_PORT = os.getenv("DB_PORT", "3306")
 DB_NAME = os.getenv("DB_NAME", "step4_team3_db")
 DB_USER = os.getenv("DB_USER", "root")
 DB_PASS = os.getenv("DB_PASS", "")
-# パスワードのURLエンコード
+# パスワードのURLエンコード（特殊文字対策）
 encoded_password = urllib.parse.quote_plus(DB_PASS)
 
 # ローカル環境とAzure環境で証明書パスを分岐
@@ -26,23 +27,26 @@ if exists(join(certificate_dir, cert_file)):
 else:
     CERT_PATH = None
 
-# SSL接続用のオプション設定（CERT_PATHが存在する場合のみ）
+# SSL接続用のオプション設定
 connect_args = {}
 if CERT_PATH:
-    connect_args["ssl"] = {"ca": CERT_PATH}  # pymysql用の設定
+    if DB_HOST in ("127.0.0.1", "localhost"):
+        # ローカル環境では自己署名証明書検証を無効にする
+        connect_args["ssl"] = {"ca": CERT_PATH, "cert_reqs": ssl.CERT_NONE}
+    else:
+        # Azure環境では通常の証明書検証を行う
+        connect_args["ssl"] = {"ca": CERT_PATH}
 
 # ローカル環境かAzure環境かで接続URLを切り替え
 def get_database_url():
-    # 例として、ホストが127.0.0.1の場合はローカル接続
-    if DB_HOST == "127.0.0.1":
+    if DB_HOST in ("127.0.0.1", "localhost"):
         return f"mysql+pymysql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     else:
-        # Azure環境の場合、クエリパラメータでSSL設定を追加
         return f"mysql+pymysql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}?ssl_ca={CERT_PATH}&ssl_verify_cert=true"
 
 DATABASE_URL = get_database_url()
 
-# エンジン作成時にconnect_argsを渡す（CERT_PATHが存在する場合のみ有効）
+# エンジン作成時にconnect_argsを渡す
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 # セッションの作成
