@@ -1,4 +1,4 @@
--- Active: 1742188538057@@tech0-techbrain-sql.mysql.database.azure.com@3306
+-- Active: 1732756335965@@localhost@3306@step4_team3_db
 -- データベースを作成
 CREATE DATABASE IF NOT EXISTS step4_team3_db;
 
@@ -116,6 +116,13 @@ CREATE TABLE item_images (
     INDEX idx_item (item_id)                       -- 物品IDでの検索を高速化
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ItemImagesテーブルの修正
+ALTER TABLE item_images
+DROP COLUMN image;
+
+ALTER TABLE item_images
+ADD COLUMN image_url VARCHAR(255) NOT NULL;         -- 画像データの保存をURLに変更
+
 -- コミュニケーション関連のテーブル群 --
 
 -- Threads（スレッドテーブル）
@@ -129,6 +136,10 @@ CREATE TABLE threads (
     FOREIGN KEY (item_id) REFERENCES items(item_id) ON DELETE CASCADE,
     INDEX idx_item (item_id)                       -- 物品IDでの検索を高速化
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE threads
+ADD CONSTRAINT uq_item_id UNIQUE (item_id);
+
 
 -- Messages（メッセージテーブル）
 -- スレッド内のメッセージを管理するテーブル
