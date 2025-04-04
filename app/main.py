@@ -16,6 +16,7 @@ from app.schemas import (
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
+# from app.schemas import GroupCreate  # ← モックサーバー用追加
 from app.crud import create_message, get_messages, delete_message, create_reaction, get_reactions_by_message, delete_reaction
 
 import socketio  #  Socket.IO
@@ -108,6 +109,7 @@ async def signup(
     db: Session = Depends(get_db)
 ):
     try:
+        # 名前の重複は除外してよさそう
         db_user = db.query(User).filter((User.username == username) | (User.email == email)).first()
         if db_user:
             raise HTTPException(status_code=400, detail="ユーザー名またはメールアドレスは既に登録されています")
@@ -162,6 +164,13 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+## モックサーバー
+## 仮のグループ作成エンドポイント（モック）
+#@app.post("/grouping")
+#async def mock_create_group(payload: GroupCreate):
+    #group_name = payload.groupName
+    #return {"message": f"グループ '{group_name}' を作成しました"}
 
 # item_id → thread_id
 @fastapi_app.get("/threads/by-item/{item_id}")
