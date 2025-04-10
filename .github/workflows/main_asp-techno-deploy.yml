@@ -14,7 +14,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +22,7 @@ jobs:
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Create and start virtual environment
         run: |
@@ -30,7 +30,9 @@ jobs:
           source venv/bin/activate
       
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
@@ -61,6 +63,19 @@ jobs:
       - name: Unzip artifact for deployment
         run: unzip release.zip
 
+      - name: Configure Azure App Service Settings
+        uses: azure/appservice-settings@v1
+        with:
+          app-name: 'asp-techno-deploy'
+          app-settings-json: |
+            [
+              {
+                "name": "WEBSITES_CONTAINER_START_TIME_LIMIT",
+                "value": "600",
+                "slotSetting": false
+              }
+            ]
+        id: settings
       
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
@@ -69,3 +84,10 @@ jobs:
           app-name: 'asp-techno-deploy'
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_A37CB9F51D47412BB5F093B51D3E7721 }}
+
+      - name: Wait for deployment to stabilize
+        run: sleep 30
+
+      - name: Check deployment status
+        run: |
+          echo "Deployment completed. Please check the Azure portal for application status."
