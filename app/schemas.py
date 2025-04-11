@@ -170,3 +170,49 @@ class ImageAnalysisResponse(BaseModel):
     detected_name: str
     confidence: Optional[float] = None
 # ====== Item関連Schema（End） ======
+
+# ====== アイテム詳細画面（Start） ======
+# ItemDetail.tsx対応
+class ItemResponse(BaseModel):
+    item_id: int
+    user_id: int
+    item_name: str
+    description: Optional[str]
+    ref_item_id: Optional[int] = None
+    category_id: Optional[int]
+    condition_rank: Optional[str]
+    status: str
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class ItemWithUsername(ItemResponse):
+    username: str
+
+    class Config:
+        from_attributes = True
+
+class ReferenceItemsResponse(BaseModel):
+    ref_item_id: int
+    category_id: int
+    item_name: str
+    brand_name: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# ending_collection_frontend-main\src\app\item\[id]\page.tsxへ画像表示対応
+class ItemImageResponse(BaseModel):
+    image_id: int
+    item_id: int
+    image_url: str
+
+    class Config:
+        from_attributes = True
+
+# ItemDetail.tsx(価格推定)対応
+class MarketPriceList(BaseModel):
+    market_prices: list[int]
+# ====== アイテム詳細画面（End） ======

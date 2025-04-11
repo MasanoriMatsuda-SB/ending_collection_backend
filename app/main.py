@@ -2,14 +2,14 @@ import os
 import uuid
 import logging
 from datetime import timedelta
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from typing import List
 
-from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage
+from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage, ReferenceItems, ReferenceMarketItem
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
     MessageCreate, MessageResponse, AttachmentType, 
@@ -17,7 +17,8 @@ from app.schemas import (
     MessageAttachment as MessageAttachmentSchema,
     MessageReaction, MessageReactionCreate,
     CategoryResponse, ItemCreate, ItemResponse, ItemUpdate,
-    ConditionRank, ImageAnalysisResponse
+    ConditionRank, ImageAnalysisResponse,
+    ItemImageResponse, ItemWithUsername, ReferenceItemsResponse, MarketPriceList
 )
 from app.utils import (
     get_password_hash, 
@@ -516,6 +517,78 @@ def get_reactions(message_id: int, db: Session = Depends(get_db)):
 def remove_reaction(message_id: int, user_id: int, db: Session = Depends(get_db)):
     delete_reaction(db, message_id, user_id)
     return {"message": "Reaction removed"}
+
+# ====== アイテム詳細画面（Start） ======
+# ItemDetail.tsx対応（パス変更後）
+@fastapi_app.get("/items/detail/{item_id}", response_model=ItemWithUsername)
+def get_item_with_username(item_id: int, db: Session = Depends(get_db)):
+    result = (
+        db.query(Item, User.username)
+        .join(User, Item.user_id == User.user_id)
+        .filter(Item.item_id == item_id)
+        .first()
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    item_obj, username = result
+
+    return ItemWithUsername(
+        item_id=item_obj.item_id,
+        user_id=item_obj.user_id,
+        item_name=item_obj.item_name,
+        description=item_obj.description,
+        ref_item_id=item_obj.ref_item_id,
+        category_id=item_obj.category_id,
+        condition_rank=item_obj.condition_rank,
+        status=item_obj.status,
+        updated_at=item_obj.updated_at,
+        username=username
+    )
+
+# ItemDetail.tsx(reference_items)対応
+@fastapi_app.get("/reference-items/{ref_item_id}", response_model=ReferenceItemsResponse)
+def get_reference_item(ref_item_id: int, db: Session = Depends(get_db)):
+    ref_item = db.query(ReferenceItems).filter(ReferenceItems.ref_item_id == ref_item_id).first()
+    if not ref_item:
+        raise HTTPException(status_code=404, detail="Reference item not found")
+    return ref_item
+
+
+# ending_collection_frontend-main\src\app\item\[id]\page.tsxへ画像表示対応
+@fastapi_app.get("/item-images/{item_id}", response_model=List[ItemImageResponse])
+def get_item_images(item_id: int, db: Session = Depends(get_db)):
+    images = db.query(ItemImage).filter(ItemImage.item_id == item_id).all()
+    return images
+
+# ending_collection_frontend-main\src\app\item\[id]\page.tsx user_id ごとの item_id 一覧API を作成
+@fastapi_app.get("/users/{user_id}/item-ids", response_model=List[int])
+def get_item_ids_by_user(user_id: int, db: Session = Depends(get_db)):
+    item_ids = (
+        db.query(Item.item_id)
+        .filter(Item.user_id == user_id)
+        .order_by(Item.item_id)
+        .all()
+    )
+    return [item_id for (item_id,) in item_ids]
+
+# ItemDetail.tsx(価格推定)対応
+@fastapi_app.get("/reference-market-items", response_model=MarketPriceList)
+def get_market_prices(
+    ref_item_id: int = Query(...),
+    condition_rank: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    query = db.query(ReferenceMarketItem.market_price).filter(ReferenceMarketItem.ref_item_id == ref_item_id)
+
+    if condition_rank and condition_rank != "全て":
+        query = query.filter(ReferenceMarketItem.condition_rank == condition_rank)
+    elif condition_rank == "全て":
+        query = query.filter((ReferenceMarketItem.condition_rank == None) | (ReferenceMarketItem.condition_rank.in_(['S', 'A', 'B', 'C', 'D'])))
+
+    prices = [p[0] for p in query.all()]
+    return {"market_prices": prices}
+# ====== アイテム詳細画面（End） ======
 
 # ====== 起動ポイント ======
 if __name__ == "__main__":

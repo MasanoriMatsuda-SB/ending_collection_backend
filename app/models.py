@@ -92,6 +92,7 @@ class Item(Base):
     item_id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     group_id = Column(Integer, nullable=False)  # family_groupsテーブルとの関連
+    ref_item_id = Column(Integer)
     category_id = Column(Integer, ForeignKey("categories.category_id"))
     item_name = Column(String(255), nullable=False)
     description = Column(Text)
@@ -124,3 +125,27 @@ class ItemImage(Base):
 
     # リレーションシップ
     item = relationship("Item", back_populates="images")
+
+# ====== アイテム詳細画面（Start） ======
+# ItemDetail.tsx対応
+class ReferenceItems(Base):
+    __tablename__ = "reference_items"
+
+    ref_item_id = Column(Integer, primary_key=True, index=True)
+    category_id = Column(Integer, nullable=False)
+    item_name = Column(String(255), nullable=False)
+    brand_name = Column(String(255), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+# ItemDetail.tsx(価格推定)対応
+class ReferenceMarketItem(Base):
+    __tablename__ = "reference_market_items"
+
+    market_item_id = Column(Integer, primary_key=True, index=True)
+    ref_item_id = Column(Integer, nullable=False)
+    market_price = Column(Integer, nullable=False)
+    condition_rank = Column(String(10), nullable=True)
+    listing_date = Column(TIMESTAMP, nullable=False)
+    status = Column(String(50), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+# ====== アイテム詳細画面（End） ======
