@@ -62,20 +62,6 @@ jobs:
 
       - name: Unzip artifact for deployment
         run: unzip release.zip
-
-      - name: Configure Azure App Service Settings
-        uses: azure/appservice-settings@v1
-        with:
-          app-name: 'asp-techno-deploy'
-          app-settings-json: |
-            [
-              {
-                "name": "WEBSITES_CONTAINER_START_TIME_LIMIT",
-                "value": "600",
-                "slotSetting": false
-              }
-            ]
-        id: settings
       
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
