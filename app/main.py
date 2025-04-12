@@ -544,20 +544,6 @@ async def delete_item_by_id(item_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Item not found")
     return {"detail": "Item successfully deleted"}
 
-# ====== Chat リアクション対応 ======
-@fastapi_app.post("/reactions", response_model=MessageReaction)
-def add_reaction(reaction: MessageReactionCreate, db: Session = Depends(get_db)):
-    return create_reaction(db, reaction)
-
-@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReaction])
-def get_reactions(message_id: int, db: Session = Depends(get_db)):
-    return get_reactions_by_message(db, message_id)
-
-@fastapi_app.delete("/reactions")
-def remove_reaction(message_id: int, user_id: int, db: Session = Depends(get_db)):
-    delete_reaction(db, message_id, user_id)
-    return {"message": "Reaction removed"}
-
 # ====== アイテム詳細画面（Start） ======
 # ItemDetail.tsx対応（パス変更後）
 @fastapi_app.get("/items/detail/{item_id}", response_model=ItemWithUsername)
