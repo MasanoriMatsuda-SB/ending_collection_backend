@@ -2,25 +2,39 @@ import os
 import uuid
 import logging
 from datetime import timedelta
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from azure.storage.blob import BlobServiceClient, ContentSettings
+from typing import List
 
-from app.models import User, Thread, Message, MessageAttachment, MessageReaction
+from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage, ReferenceItems, ReferenceMarketItem, MessageReaction
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
-    MessageCreate, MessageResponse, AttachmentType, MessageAttachmentBase, MessageAttachmentCreate, MessageAttachment as MessageAttachmentSchema, MessageReaction as MessageReactionSchema, MessageReactionCreate, ThreadCreate
+    MessageCreate, MessageResponse, AttachmentType, 
+    MessageAttachmentBase, MessageAttachmentCreate, 
+    MessageAttachment as MessageAttachmentSchema,
+    MessageReaction as MessageReactionSchema, MessageReactionCreate, ThreadCreate,
+    CategoryResponse, ItemCreate, ItemResponse, ItemUpdate,
+    ConditionRank, ImageAnalysisResponse,
+    ItemImageResponse, ItemWithUsername, ReferenceItemsResponse, MarketPriceList
 )
-from app.utils import get_password_hash, verify_password
+from app.utils import (
+    get_password_hash, 
+    verify_password,
+    ItemRecognitionService
+)
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
-from app.crud import create_message, get_messages, delete_message, create_reaction, get_reactions_by_message, delete_reaction, create_thread, get_messages_by_item_id
-
-import socketio  #  Socket.IO
-
-from typing import List
+from app.crud import (
+    create_message, get_messages, delete_message, 
+    create_reaction, get_reactions_by_message, delete_reaction, create_thread, get_messages_by_item_id,
+    get_categories, create_item, get_item,
+    get_user_items, get_group_items, update_item,
+    delete_item
+)
+import socketio
 
 from app.rag_utils import chat_llm_summarize, index_messages_for_item, search_chat_vector
 
@@ -28,10 +42,10 @@ from app.rag_utils import chat_llm_summarize, index_messages_for_item, search_ch
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("meme_mori_backend")
 
-#  Socket.IO サーバー作成
+# Socket.IO サーバー作成
 sio = socketio.AsyncServer(cors_allowed_origins="*", async_mode="asgi")
 fastapi_app = FastAPI()
-app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)  # FastAPI + SocketIOを結合
+app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)
 
 # CORS設定
 origins = [
@@ -47,6 +61,9 @@ fastapi_app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ItemRecognitionService のインスタンス作成
+item_recognition_service = ItemRecognitionService()
 
 # グローバル例外ハンドラー
 @fastapi_app.exception_handler(Exception)
@@ -75,30 +92,15 @@ async def send_message(sid, data):
     logger.info(f"Message from {sid}: {data}")
     await sio.emit("receive_message", data)
 
-# リアクション対応
 @sio.on("add_reaction")
 async def handle_add_reaction(sid, data):
-    """
-    data: {
-        "message_id": int,
-        "user_id": int,
-        "reaction_type": str
-    }
-    """
     logger.info(f"リアクション追加: {data}")
     await sio.emit("reaction_added", data)
 
 @sio.on("remove_reaction")
 async def handle_remove_reaction(sid, data):
-    """
-    data: {
-        "message_id": int,
-        "user_id": int
-    }
-    """
     logger.info(f"リアクション削除: {data}")
     await sio.emit("reaction_removed", data)
-
 
 # サインアップ
 @fastapi_app.post("/signup", response_model=UserOut)
@@ -110,6 +112,7 @@ async def signup(
     db: Session = Depends(get_db)
 ):
     try:
+        # 名前の重複は除外してよさそう
         db_user = db.query(User).filter((User.username == username) | (User.email == email)).first()
         if db_user:
             raise HTTPException(status_code=400, detail="ユーザー名またはメールアドレスは既に登録されています")
@@ -165,6 +168,13 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
+## モックサーバー
+## 仮のグループ作成エンドポイント（モック）
+#@app.post("/grouping")
+#async def mock_create_group(payload: GroupCreate):
+    #group_name = payload.groupName
+    #return {"message": f"グループ '{group_name}' を作成しました"}
+
 # item_id → thread_id
 @fastapi_app.get("/threads/by-item/{item_id}")
 def get_thread_by_item(item_id: int, db: Session = Depends(get_db)):
@@ -174,7 +184,7 @@ def get_thread_by_item(item_id: int, db: Session = Depends(get_db)):
     return {"thread_id": thread.thread_id}
 
 # メッセージ取得
-@fastapi_app.get("/messages", response_model=list[MessageResponse])
+@fastapi_app.get("/messages", response_model=List[MessageResponse])
 def read_messages(thread_id: int, db: Session = Depends(get_db)):
     logger.info(f"メッセージ取得 thread_id={thread_id}")
     messages = (
@@ -218,7 +228,7 @@ def post_message(message: MessageCreate, db: Session = Depends(get_db)):
     )
     return response
 
-# メッセージの添付ファイル対応
+# メッセージ添付ファイル対応
 @fastapi_app.post("/message_attachments", response_model=MessageAttachmentSchema)
 async def upload_attachment(
     message_id: int = Form(...),
@@ -229,7 +239,6 @@ async def upload_attachment(
         if not file.filename:
             raise HTTPException(status_code=400, detail="ファイルが指定されていません")
 
-        # MIMEタイプから attachment_type 判定
         content_type = file.content_type or "application/octet-stream"
         if content_type.startswith("image/"):
             attachment_type = AttachmentType.image
@@ -240,10 +249,8 @@ async def upload_attachment(
         else:
             attachment_type = AttachmentType.file
 
-        # Azure Blob Storage にアップロード
         connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-        container_name = "message-attachments"  # ← こちらは、環境変数ではなく固定にしてます（適宜全体感と合わせて調整）
-
+        container_name = "message-attachments"
         if not connection_string:
             raise HTTPException(status_code=500, detail="Azure Storage 接続情報が設定されていません")
 
@@ -261,13 +268,11 @@ async def upload_attachment(
         attachment_url = blob_client.url
         logger.info(f"ファイルをアップロードしました: {attachment_url}")
 
-        # DBに保存
         attachment = MessageAttachment(
             message_id=message_id,
             attachment_type=attachment_type,
             attachment_url=attachment_url,
         )
-        
         try:
             db.add(attachment)
             db.commit()
@@ -283,7 +288,7 @@ async def upload_attachment(
         logger.error(f"添付ファイルアップロード失敗: {e}")
         raise HTTPException(status_code=500, detail=f"アップロードエラー: {e}")
 
-@fastapi_app.get("/attachments/by-message/{message_id}", response_model=list[MessageAttachmentSchema])
+@fastapi_app.get("/attachments/by-message/{message_id}", response_model=List[MessageAttachmentSchema])
 def get_attachments_by_message_id(message_id: int, db: Session = Depends(get_db)):
     attachments = (
         db.query(MessageAttachment)
@@ -314,7 +319,6 @@ def add_reaction(
 def get_reactions(message_id: int, db: Session = Depends(get_db)):
     return get_reactions_by_message(db, message_id)
 
-
 @fastapi_app.delete("/reactions")
 def remove_reaction(
     message_id: int,
@@ -324,8 +328,6 @@ def remove_reaction(
     delete_reaction(db, message_id, user_id)
     return {"message": "Reaction removed"}
 # ====== Chat リアクション対応（EndEnd） ====== 
-
-
 
 # ====== Thread作成エンドポイント（Start） ====== 
 @fastapi_app.post("/threads")
@@ -362,7 +364,279 @@ def vector_search_chat(item_id: str, query: str):
 
 
 
+# ====== Item関連エンドポイント ======
+@fastapi_app.get("/categories", response_model=List[CategoryResponse])
+async def list_categories(db: Session = Depends(get_db)):
+    """カテゴリー一覧を取得"""
+    return get_categories(db)
+
+@fastapi_app.post("/items/analyze")
+async def analyze_item_image(
+    image: UploadFile = File(...)
+) -> ImageAnalysisResponse:
+    """画像を分析して物品名を認識"""
+    try:
+        image_data = await image.read()
+        result = await item_recognition_service.analyze_image(image_data)
+        return ImageAnalysisResponse(**result)
+    except Exception as e:
+        logger.error(f"画像分析に失敗: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@fastapi_app.post("/items", response_model=ItemResponse)
+async def create_new_item(
+    image: UploadFile = File(...),
+    item_name: str = Form(...),
+    group_id: int = Form(...),
+    category_id: int = Form(...),
+    condition_rank: ConditionRank = Form(...),
+    description: str = Form(...),
+    user_id: int = Form(...),
+    db: Session = Depends(get_db)
+):
+    """物品を登録"""
+    try:
+        # 画像のアップロード
+        image_data = await image.read()
+        image_url = await item_recognition_service.upload_image(image_data)
+
+        # 物品情報の作成
+        item_data = ItemCreate(
+            item_name=item_name,
+            group_id=group_id,
+            category_id=category_id,
+            condition_rank=condition_rank,
+            description=description
+        )
+
+        # データベースに保存。create_item 関数内部で ItemImage レコードも作成される前提。
+        db_item = create_item(db, user_id, item_data, image_url)
+        
+        # レスポンスの作成（全必須フィールドを含める）
+        return ItemResponse(
+            item_id=db_item.item_id,
+            user_id=db_item.user_id,
+            group_id=db_item.group_id,
+            item_name=db_item.item_name,
+            category_id=db_item.category_id,
+            category_name=db_item.category.category_name if db_item.category else "",
+            condition_rank=db_item.condition_rank,
+            description=db_item.description,
+            status=db_item.status,
+            created_at=db_item.created_at,
+            updated_at=db_item.updated_at,
+            images=[{
+                "image_id": img.image_id,
+                "image_url": img.image_url,
+                "uploaded_at": img.uploaded_at
+            } for img in db_item.images],
+            detection_confidence=getattr(db_item, "detection_confidence", None)
+        )
+
+    except Exception as e:
+        logger.error(f"物品登録に失敗: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@fastapi_app.get("/items/{item_id}", response_model=ItemResponse)
+async def get_item_by_id(item_id: int, db: Session = Depends(get_db)):
+    """物品の詳細を取得"""
+    item = get_item(db, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    # GET エンドポイントでも必要なフィールドを明示的に返す
+    return ItemResponse(
+        item_id=item.item_id,
+        user_id=item.user_id,
+        group_id=item.group_id,
+        item_name=item.item_name,
+        category_id=item.category_id,
+        category_name=item.category.category_name if item.category else "",
+        condition_rank=item.condition_rank,
+        description=item.description,
+        status=item.status,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+        images=[{
+            "image_id": img.image_id,
+            "image_url": img.image_url,
+            "uploaded_at": img.uploaded_at
+        } for img in item.images],
+        detection_confidence=getattr(item, "detection_confidence", None)
+    )
+
+@fastapi_app.get("/items/user/{user_id}", response_model=List[ItemResponse])
+async def list_user_items(
+    user_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """ユーザーの物品一覧を取得"""
+    items = get_user_items(db, user_id, skip, limit)
+    return [
+        ItemResponse(
+            item_id=item.item_id,
+            user_id=item.user_id,
+            group_id=item.group_id,
+            item_name=item.item_name,
+            category_id=item.category_id,
+            category_name=item.category.category_name if item.category else "",
+            condition_rank=item.condition_rank,
+            description=item.description,
+            status=item.status,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+            images=[{
+                "image_id": img.image_id,
+                "image_url": img.image_url,
+                "uploaded_at": img.uploaded_at
+            } for img in item.images],
+            detection_confidence=getattr(item, "detection_confidence", None)
+        )
+        for item in items
+    ]
+
+@fastapi_app.get("/items/group/{group_id}", response_model=List[ItemResponse])
+async def list_group_items(
+    group_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """グループの物品一覧を取得"""
+    items = get_group_items(db, group_id, skip, limit)
+    return [
+        ItemResponse(
+            item_id=item.item_id,
+            user_id=item.user_id,
+            group_id=item.group_id,
+            item_name=item.item_name,
+            category_id=item.category_id,
+            category_name=item.category.category_name if item.category else "",
+            condition_rank=item.condition_rank,
+            description=item.description,
+            status=item.status,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+            images=[{
+                "image_id": img.image_id,
+                "image_url": img.image_url,
+                "uploaded_at": img.uploaded_at
+            } for img in item.images],
+            detection_confidence=getattr(item, "detection_confidence", None)
+        )
+        for item in items
+    ]
+
+@fastapi_app.patch("/items/{item_id}", response_model=ItemResponse)
+async def update_item_by_id(item_id: int, item_data: ItemUpdate, db: Session = Depends(get_db)):
+    """物品情報を更新"""
+    updated_item = update_item(db, item_id, item_data)
+    if not updated_item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return updated_item
+
+@fastapi_app.delete("/items/{item_id}")
+async def delete_item_by_id(item_id: int, db: Session = Depends(get_db)):
+    """物品を削除"""
+    success = delete_item(db, item_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"detail": "Item successfully deleted"}
+
+# ====== Chat リアクション対応 ======
+@fastapi_app.post("/reactions", response_model=MessageReaction)
+def add_reaction(reaction: MessageReactionCreate, db: Session = Depends(get_db)):
+    return create_reaction(db, reaction)
+
+@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReaction])
+def get_reactions(message_id: int, db: Session = Depends(get_db)):
+    return get_reactions_by_message(db, message_id)
+
+@fastapi_app.delete("/reactions")
+def remove_reaction(message_id: int, user_id: int, db: Session = Depends(get_db)):
+    delete_reaction(db, message_id, user_id)
+    return {"message": "Reaction removed"}
+
+# ====== アイテム詳細画面（Start） ======
+# ItemDetail.tsx対応（パス変更後）
+@fastapi_app.get("/items/detail/{item_id}", response_model=ItemWithUsername)
+def get_item_with_username(item_id: int, db: Session = Depends(get_db)):
+    result = (
+        db.query(Item, User.username)
+        .join(User, Item.user_id == User.user_id)
+        .filter(Item.item_id == item_id)
+        .first()
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    item_obj, username = result
+
+    return ItemWithUsername(
+        item_id=item_obj.item_id,
+        user_id=item_obj.user_id,
+        item_name=item_obj.item_name,
+        description=item_obj.description,
+        ref_item_id=item_obj.ref_item_id,
+        category_id=item_obj.category_id,
+        condition_rank=item_obj.condition_rank,
+        status=item_obj.status,
+        updated_at=item_obj.updated_at,
+        username=username
+    )
+
+# ItemDetail.tsx(reference_items)対応
+@fastapi_app.get("/reference-items/{ref_item_id}", response_model=ReferenceItemsResponse)
+def get_reference_item(ref_item_id: int, db: Session = Depends(get_db)):
+    ref_item = db.query(ReferenceItems).filter(ReferenceItems.ref_item_id == ref_item_id).first()
+    if not ref_item:
+        raise HTTPException(status_code=404, detail="Reference item not found")
+    return ref_item
+
+
+# ending_collection_frontend-main\src\app\item\[id]\page.tsxへ画像表示対応
+@fastapi_app.get("/item-images/{item_id}", response_model=List[ItemImageResponse])
+def get_item_images(item_id: int, db: Session = Depends(get_db)):
+    images = db.query(ItemImage).filter(ItemImage.item_id == item_id).all()
+    return images
+
+# ending_collection_frontend-main\src\app\item\[id]\page.tsx user_id ごとの item_id 一覧API を作成
+@fastapi_app.get("/users/{user_id}/item-ids", response_model=List[int])
+def get_item_ids_by_user(user_id: int, db: Session = Depends(get_db)):
+    item_ids = (
+        db.query(Item.item_id)
+        .filter(Item.user_id == user_id)
+        .order_by(Item.item_id)
+        .all()
+    )
+    return [item_id for (item_id,) in item_ids]
+
+# ItemDetail.tsx(価格推定)対応
+@fastapi_app.get("/reference-market-items", response_model=MarketPriceList)
+def get_market_prices(
+    ref_item_id: int = Query(...),
+    condition_rank: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    query = db.query(ReferenceMarketItem.market_price).filter(ReferenceMarketItem.ref_item_id == ref_item_id)
+
+    if condition_rank and condition_rank != "全て":
+        query = query.filter(ReferenceMarketItem.condition_rank == condition_rank)
+    elif condition_rank == "全て":
+        query = query.filter((ReferenceMarketItem.condition_rank == None) | (ReferenceMarketItem.condition_rank.in_(['S', 'A', 'B', 'C', 'D'])))
+
+    prices = [p[0] for p in query.all()]
+    return {"market_prices": prices}
+# ====== アイテム詳細画面（End） ======
+
+
+
+
+
+
 #  起動ポイント変更
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

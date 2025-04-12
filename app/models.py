@@ -1,9 +1,9 @@
 # app/models.py
 from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, Boolean, ForeignKey, func
-from app.db import Base
 from sqlalchemy.orm import relationship
 from sqlalchemy import Enum as SqlEnum
 import enum
+from app.db import Base
 
 class User(Base):
     __tablename__ = "users"  # 既存のテーブル名と一致させる
@@ -15,25 +15,28 @@ class User(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
-
 class Thread(Base):
     __tablename__ = "threads"
 
     thread_id = Column(Integer, primary_key=True, autoincrement=True)
-    item_id = Column(Integer, nullable=False)
+    # item_id は items.item_id を参照する外部キー、かつ UNIQUE 制約を付与して一対一を保証
+    item_id = Column(Integer, ForeignKey("items.item_id", ondelete="CASCADE"), nullable=False, unique=True)
     title = Column(String(255), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
     messages = relationship("Message", back_populates="thread")
     
+    # Item と Thread の一対一のリレーションシップ（back_populates を使用）
+    item = relationship("Item", back_populates="thread")
+
 class Message(Base):
     __tablename__ = "messages"
 
     message_id = Column(Integer, primary_key=True)
     thread_id = Column(Integer, ForeignKey("threads.thread_id"))
     user_id = Column(Integer, ForeignKey("users.user_id"))
-    parent_message_id = Column(Integer,nullable=True)
+    parent_message_id = Column(Integer, nullable=True)
     content = Column(Text, nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -74,3 +77,79 @@ class MessageReaction(Base):
         nullable=False
     )
     created_at = Column(TIMESTAMP, server_default=func.now())
+
+# 画像解析対応
+class Category(Base):
+    __tablename__ = "categories"
+    
+    category_id = Column(Integer, primary_key=True, index=True)
+    category_name = Column(String(100), nullable=False)
+    parent_category_id = Column(Integer, ForeignKey("categories.category_id"))
+
+    # 自己参照リレーションシップ
+    parent_category = relationship("Category", remote_side=[category_id])
+    items = relationship("Item", back_populates="category")
+
+class Item(Base):
+    __tablename__ = "items"
+    
+    item_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    group_id = Column(Integer, nullable=False)  # family_groupsテーブルとの関連
+    ref_item_id = Column(Integer)
+    category_id = Column(Integer, ForeignKey("categories.category_id"))
+    item_name = Column(String(255), nullable=False)
+    description = Column(Text)
+    condition_rank = Column(
+        SqlEnum("S", "A", "B", "C", "D", name="condition_rank_enum"),
+        nullable=False
+    )
+    status = Column(
+        SqlEnum("active", "archived", name="item_status_enum"),
+        nullable=False,
+        server_default="active"
+    )
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    # リレーションシップ
+    user = relationship("User", backref="items")
+    category = relationship("Category", back_populates="items")
+    images = relationship("ItemImage", back_populates="item", cascade="all, delete-orphan")
+    # 一対一の関係：各 Item に対して Thread が1件
+    thread = relationship("Thread", back_populates="item", uselist=False)
+
+class ItemImage(Base):
+    __tablename__ = "item_images"
+    
+    image_id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("items.item_id", ondelete="CASCADE"), nullable=False)
+    image_url = Column(String(255), nullable=False)
+    uploaded_at = Column(TIMESTAMP, server_default=func.now())
+
+    # リレーションシップ
+    item = relationship("Item", back_populates="images")
+
+# ====== アイテム詳細画面（Start） ======
+# ItemDetail.tsx対応
+class ReferenceItems(Base):
+    __tablename__ = "reference_items"
+
+    ref_item_id = Column(Integer, primary_key=True, index=True)
+    category_id = Column(Integer, nullable=False)
+    item_name = Column(String(255), nullable=False)
+    brand_name = Column(String(255), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+# ItemDetail.tsx(価格推定)対応
+class ReferenceMarketItem(Base):
+    __tablename__ = "reference_market_items"
+
+    market_item_id = Column(Integer, primary_key=True, index=True)
+    ref_item_id = Column(Integer, nullable=False)
+    market_price = Column(Integer, nullable=False)
+    condition_rank = Column(String(10), nullable=True)
+    listing_date = Column(TIMESTAMP, nullable=False)
+    status = Column(String(50), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+# ====== アイテム詳細画面（End） ======
