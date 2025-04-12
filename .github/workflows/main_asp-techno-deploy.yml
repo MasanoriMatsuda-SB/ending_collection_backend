@@ -28,11 +28,20 @@ jobs:
         run: |
           python -m venv venv
           source venv/bin/activate
-      
+
+      # Old Version
+      # - name: Install dependencies
+      #   run: |
+      #     python -m pip install --upgrade pip
+      #     pip install -r requirements.txt
+
+      # Revised Ver. 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          mkdir -p /home/tmp-cache
+          pip install --cache-dir=/home/tmp-cache -r requirements.txt
+
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
