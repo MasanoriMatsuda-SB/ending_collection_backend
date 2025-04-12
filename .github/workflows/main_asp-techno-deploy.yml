@@ -39,8 +39,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          mkdir -p /home/tmp-cache
-          pip install --cache-dir=/home/tmp-cache -r requirements.txt
+          
+          # GitHub Actions 上の安全な一時ディレクトリを作成して pip キャッシュに使用
+          mkdir -p $HOME/tmp-cache
+          
+          # 旧方式（tmp に依存）: pip install -r requirements.txt
+          pip install --cache-dir=$HOME/tmp-cache -r requirements.txt
 
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
