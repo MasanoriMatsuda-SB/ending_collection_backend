@@ -18,7 +18,8 @@ from app.schemas import (
     MessageReactionCreate,
     ItemCreate,
     CategoryCreate,
-    ItemUpdate
+    ItemUpdate,
+    ThreadCreate
 )
 from app.services.blob import delete_blob_by_url
 
@@ -94,6 +95,30 @@ def delete_reaction(db: Session, message_id: int, user_id: int):
     ).delete()
     db.commit()
 # =====Chatreaction関連CRUD(End)=====
+
+# ====== ChatReaction関連CRUD（End） ====== 
+
+
+# ====== threads 作成関数CRUD（Start） ====== 
+def create_thread(db: Session, thread: ThreadCreate):
+    new_thread = Thread(**thread.dict())
+    db.add(new_thread)
+    db.commit()
+    db.refresh(new_thread)
+    return new_thread
+# ====== threads 作成関数CRUD（End） ====== 
+
+
+# ====== RAG関連CRUD（Start） ====== 
+def get_messages_by_item_id(db: Session, item_id: str) -> list[Message]:
+    return (
+        db.query(Message)
+        .filter(Message.thread.has(item_id=item_id))  # Threadの外部キーを利用
+        .order_by(Message.created_at)
+        .all()
+    )
+# ====== RAG関連CRUD（End） ====== 
+
 
 # =====Item関連CRUD(Start)=====
 # カテゴリー関連CRUD
