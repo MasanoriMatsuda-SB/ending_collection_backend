@@ -90,3 +90,9 @@ class MessageReaction(MessageReactionBase):
         orm_mode = True
 
 # ====== ChatAttachment関連Schema（End） ====== 
+
+# ====== Threads作成関連Schema（Start） ====== 
+class ThreadCreate(BaseModel):
+    item_id: int
+
+# ====== Threads作成関連Schema（End） ====== 

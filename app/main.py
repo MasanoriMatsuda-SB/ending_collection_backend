@@ -8,19 +8,21 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
-from app.models import User, Thread, Message, MessageAttachment
+from app.models import User, Thread, Message, MessageAttachment, MessageReaction
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
-    MessageCreate, MessageResponse, AttachmentType, MessageAttachmentBase, MessageAttachmentCreate, MessageAttachment as MessageAttachmentSchema, MessageReaction, MessageReactionCreate
+    MessageCreate, MessageResponse, AttachmentType, MessageAttachmentBase, MessageAttachmentCreate, MessageAttachment as MessageAttachmentSchema, MessageReaction as MessageReactionSchema, MessageReactionCreate, ThreadCreate
 )
 from app.utils import get_password_hash, verify_password
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
-from app.crud import create_message, get_messages, delete_message, create_reaction, get_reactions_by_message, delete_reaction
+from app.crud import create_message, get_messages, delete_message, create_reaction, get_reactions_by_message, delete_reaction, create_thread, get_messages_by_item_id
 
 import socketio  #  Socket.IO
 
 from typing import List
+
+from app.rag_utils import chat_llm_summarize, index_messages_for_item, search_chat_vector
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -300,7 +302,7 @@ def delete_message_endpoint(message_id: int, db: Session = Depends(get_db)):
 
 
 # ====== Chat リアクション対応（Start） ====== 
-@fastapi_app.post("/reactions", response_model=MessageReaction)
+@fastapi_app.post("/reactions", response_model=MessageReactionSchema)
 def add_reaction(
     reaction: MessageReactionCreate,
     db: Session = Depends(get_db)
@@ -308,7 +310,7 @@ def add_reaction(
     return create_reaction(db, reaction)
 
 
-@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReaction])
+@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReactionSchema])
 def get_reactions(message_id: int, db: Session = Depends(get_db)):
     return get_reactions_by_message(db, message_id)
 
@@ -322,6 +324,42 @@ def remove_reaction(
     delete_reaction(db, message_id, user_id)
     return {"message": "Reaction removed"}
 # ====== Chat リアクション対応（EndEnd） ====== 
+
+
+
+# ====== Thread作成エンドポイント（Start） ====== 
+@fastapi_app.post("/threads")
+def create_new_thread(thread: ThreadCreate, db: Session = Depends(get_db)):
+    try:
+        new_thread = create_thread(db, thread)
+        return {"thread_id": new_thread.thread_id}
+    except Exception as e:
+        logger.error(f"スレッド作成失敗: {e}")
+        raise HTTPException(status_code=500, detail="スレッド作成中にエラーが発生しました")
+# ====== Thread作成エンドポイント（End） ====== 
+
+
+# ====== RAG関連エンドポイント（Start） ====== 
+@fastapi_app.get("/rag/summary/{item_id}")
+def get_summary(item_id: str, db: Session = Depends(get_db)):
+    messages = get_messages_by_item_id(db, item_id)
+    text = "\n".join([m.content for m in messages])
+    summary = chat_llm_summarize(text)  # LLM API 連携関数
+    return {"summary": summary}
+
+# Step5 - ベクトル登録 & 検索エンドポイント
+@fastapi_app.post("/rag/index/{item_id}")
+def index_for_item(item_id: str, db: Session = Depends(get_db)):
+    index_messages_for_item(db, item_id)
+    return {"message": "インデックス作成完了"}
+
+@fastapi_app.get("/rag/vector_search/{item_id}")
+def vector_search_chat(item_id: str, query: str):
+    results = search_chat_vector(item_id, query)
+    return {"results": results}
+
+# ====== RAG関連エンドポイント（End） ====== 
+
 
 
 #  起動ポイント変更
