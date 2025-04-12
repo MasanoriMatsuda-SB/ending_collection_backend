@@ -25,6 +25,8 @@ class Thread(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
+    messages = relationship("Message", back_populates="thread")
+    
     # Item と Thread の一対一のリレーションシップ（back_populates を使用）
     item = relationship("Item", back_populates="thread")
 
@@ -42,6 +44,8 @@ class Message(Base):
 
     user = relationship("User", backref="messages")
     attachments = relationship("MessageAttachment", back_populates="message") 
+
+    thread = relationship("Thread", back_populates="messages")
 
 # Attachments対応
 class AttachmentType(str, enum.Enum):

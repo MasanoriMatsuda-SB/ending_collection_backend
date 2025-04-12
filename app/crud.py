@@ -59,11 +59,28 @@ def delete_message(db: Session, message_id: int):
 
 # =====Chatreaction関連CRUD(Start)=====
 def create_reaction(db: Session, reaction: MessageReactionCreate):
-    db_reaction = MessageReaction(**reaction.dict())
-    db.add(db_reaction)
-    db.commit()
-    db.refresh(db_reaction)
-    return db_reaction
+    # すでに同じユーザーのリアクションが存在するか確認
+    existing = db.query(MessageReaction).filter(
+        MessageReaction.message_id == reaction.message_id,
+        MessageReaction.user_id == reaction.user_id
+    ).first()
+
+    if existing:
+        # 同じリアクションタイプの場合は何もしない
+        if existing.reaction_type == reaction.reaction_type:
+            return existing
+        # 違うリアクションなら更新
+        existing.reaction_type = reaction.reaction_type
+        db.commit()
+        db.refresh(existing)
+        return existing
+    else:
+        # なければ新規作成
+        db_reaction = MessageReaction(**reaction.dict())
+        db.add(db_reaction)
+        db.commit()
+        db.refresh(db_reaction)
+        return db_reaction
 
 def get_reactions_by_message(db: Session, message_id: int):
     return db.query(MessageReaction).filter(

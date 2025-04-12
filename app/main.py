@@ -9,13 +9,13 @@ from sqlalchemy.orm import Session
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from typing import List
 
-from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage, ReferenceItems, ReferenceMarketItem
+from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage, ReferenceItems, ReferenceMarketItem, MessageReaction
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
     MessageCreate, MessageResponse, AttachmentType, 
     MessageAttachmentBase, MessageAttachmentCreate, 
     MessageAttachment as MessageAttachmentSchema,
-    MessageReaction, MessageReactionCreate,
+    MessageReaction as MessageReactionSchema, MessageReactionCreate, ThreadCreate,
     CategoryResponse, ItemCreate, ItemResponse, ItemUpdate,
     ConditionRank, ImageAnalysisResponse,
     ItemImageResponse, ItemWithUsername, ReferenceItemsResponse, MarketPriceList
@@ -29,12 +29,14 @@ from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
 from app.crud import (
     create_message, get_messages, delete_message, 
-    create_reaction, get_reactions_by_message, delete_reaction,
+    create_reaction, get_reactions_by_message, delete_reaction, create_thread, get_messages_by_item_id,
     get_categories, create_item, get_item,
     get_user_items, get_group_items, update_item,
     delete_item
 )
 import socketio
+
+from app.rag_utils import chat_llm_summarize, index_messages_for_item, search_chat_vector
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -303,15 +305,17 @@ def delete_message_endpoint(message_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Message not found")
     return {"detail": "Message deleted"}
 
-# ====== Chat リアクション対応 ======
-@fastapi_app.post("/reactions", response_model=MessageReaction)
+
+# ====== Chat リアクション対応（Start） ====== 
+@fastapi_app.post("/reactions", response_model=MessageReactionSchema)
 def add_reaction(
     reaction: MessageReactionCreate,
     db: Session = Depends(get_db)
 ):
     return create_reaction(db, reaction)
 
-@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReaction])
+
+@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReactionSchema])
 def get_reactions(message_id: int, db: Session = Depends(get_db)):
     return get_reactions_by_message(db, message_id)
 
@@ -323,6 +327,42 @@ def remove_reaction(
 ):
     delete_reaction(db, message_id, user_id)
     return {"message": "Reaction removed"}
+# ====== Chat リアクション対応（EndEnd） ====== 
+
+# ====== Thread作成エンドポイント（Start） ====== 
+@fastapi_app.post("/threads")
+def create_new_thread(thread: ThreadCreate, db: Session = Depends(get_db)):
+    try:
+        new_thread = create_thread(db, thread)
+        return {"thread_id": new_thread.thread_id}
+    except Exception as e:
+        logger.error(f"スレッド作成失敗: {e}")
+        raise HTTPException(status_code=500, detail="スレッド作成中にエラーが発生しました")
+# ====== Thread作成エンドポイント（End） ====== 
+
+
+# ====== RAG関連エンドポイント（Start） ====== 
+@fastapi_app.get("/rag/summary/{item_id}")
+def get_summary(item_id: str, db: Session = Depends(get_db)):
+    messages = get_messages_by_item_id(db, item_id)
+    text = "\n".join([m.content for m in messages])
+    summary = chat_llm_summarize(text)  # LLM API 連携関数
+    return {"summary": summary}
+
+# Step5 - ベクトル登録 & 検索エンドポイント
+@fastapi_app.post("/rag/index/{item_id}")
+def index_for_item(item_id: str, db: Session = Depends(get_db)):
+    index_messages_for_item(db, item_id)
+    return {"message": "インデックス作成完了"}
+
+@fastapi_app.get("/rag/vector_search/{item_id}")
+def vector_search_chat(item_id: str, query: str):
+    results = search_chat_vector(item_id, query)
+    return {"results": results}
+
+# ====== RAG関連エンドポイント（End） ====== 
+
+
 
 # ====== Item関連エンドポイント ======
 @fastapi_app.get("/categories", response_model=List[CategoryResponse])
@@ -590,7 +630,13 @@ def get_market_prices(
     return {"market_prices": prices}
 # ====== アイテム詳細画面（End） ======
 
-# ====== 起動ポイント ======
+
+
+
+
+
+#  起動ポイント変更
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
