@@ -37,8 +37,8 @@ from app.crud import (
 import socketio
 
 
-# デプロイ回避のため一時コメントアウト
-# from app.rag_utils import chat_llm_summarize, index_messages_for_item, search_chat_vector
+# RAG用
+from app.rag_utils import chat_llm_summarize, index_messages_for_item, search_chat_vector
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -177,6 +177,9 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     #group_name = payload.groupName
     #return {"message": f"グループ '{group_name}' を作成しました"}
 
+
+# ====== Chat 関連（Start） ================================================
+ 
 # item_id → thread_id
 @fastapi_app.get("/threads/by-item/{item_id}")
 def get_thread_by_item(item_id: int, db: Session = Depends(get_db)):
@@ -343,28 +346,28 @@ def create_new_thread(thread: ThreadCreate, db: Session = Depends(get_db)):
 # ====== Thread作成エンドポイント（End） ====== 
 
 
-# ====== RAG関連エンドポイント（Start） ====== 　　（デプロイエラー回避のため一時コメントアウト）
-# @fastapi_app.get("/rag/summary/{item_id}")
-# def get_summary(item_id: str, db: Session = Depends(get_db)):
-#     messages = get_messages_by_item_id(db, item_id)
-#     text = "\n".join([m.content for m in messages])
-#     summary = chat_llm_summarize(text)  # LLM API 連携関数
-#     return {"summary": summary}
+# ====== RAG関連エンドポイント（Start） ====== 
+@fastapi_app.get("/rag/summary/{item_id}")
+def get_summary(item_id: str, db: Session = Depends(get_db)):
+    messages = get_messages_by_item_id(db, item_id)
+    text = "\n".join([m.content for m in messages])
+    summary = chat_llm_summarize(text)  # LLM API 連携関数
+    return {"summary": summary}
 
-# # Step5 - ベクトル登録 & 検索エンドポイント
-# @fastapi_app.post("/rag/index/{item_id}")
-# def index_for_item(item_id: str, db: Session = Depends(get_db)):
-#     index_messages_for_item(db, item_id)
-#     return {"message": "インデックス作成完了"}
+# Step5 - ベクトル登録 & 検索エンドポイント
+@fastapi_app.post("/rag/index/{item_id}")
+def index_for_item(item_id: str, db: Session = Depends(get_db)):
+    index_messages_for_item(db, item_id)
+    return {"message": "インデックス作成完了"}
 
-# @fastapi_app.get("/rag/vector_search/{item_id}")
-# def vector_search_chat(item_id: str, query: str):
-#     results = search_chat_vector(item_id, query)
-#     return {"results": results}
+@fastapi_app.get("/rag/vector_search/{item_id}")
+def vector_search_chat(item_id: str, query: str):
+    results = search_chat_vector(item_id, query)
+    return {"results": results}
 
 # ====== RAG関連エンドポイント（End） ====== 
 
-
+# ====== Chat 関連（End） ============================================================
 
 # ====== Item関連エンドポイント ======
 @fastapi_app.get("/categories", response_model=List[CategoryResponse])
