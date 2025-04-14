@@ -15,6 +15,20 @@ class User(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
+# Grouping
+class FamilyGroup(Base):
+    __tablename__ = "family_groups"
+    group_id = Column(Integer, primary_key=True, index=True)
+    group_name = Column(String(100), nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+class UserFamilyGroup(Base):
+    __tablename__ = "user_family_groups"
+    user_id = Column(Integer, ForeignKey("users.user_id"), primary_key=True)
+    group_id = Column(Integer, ForeignKey("family_groups.group_id"), primary_key=True)
+    role = Column(SqlEnum("poster", "viewer", name="user_role_enum"), nullable=False)
+    joined_at = Column(TIMESTAMP, server_default=func.now())
+
 class Thread(Base):
     __tablename__ = "threads"
 

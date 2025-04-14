@@ -29,6 +29,18 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
+# ====== Grouping Schema（Start） ====== 
+class GroupCreate(BaseModel):
+    groupName: str
+
+class GroupResponse(BaseModel):
+    group_id: int
+    group_name: str
+
+    class Config:
+        from_attributes = True
+# ====== Grouping Schema（end） ====== 
+
 # ====== Chat関連Schema（Start） ====== 
 class MessageCreate(BaseModel):
     thread_id: int
