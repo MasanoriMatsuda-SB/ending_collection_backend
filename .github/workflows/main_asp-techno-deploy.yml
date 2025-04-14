@@ -84,6 +84,7 @@
            app-name: 'asp-techno-deploy'
            slot-name: 'Production'
            publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_A37CB9F51D47412BB5F093B51D3E7721 }}
+           compression-level: 1    # Azure Webapps-deployの圧縮レベルを1に設定し、圧縮処理にかかるメモリを削減
  
        - name: Wait for deployment to stabilize
          run: sleep 30
