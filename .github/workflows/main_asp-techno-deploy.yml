@@ -92,6 +92,7 @@
            app-name: 'asp-techno-deploy'
            slot-name: 'Production'
            publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_A37CB9F51D47412BB5F093B51D3E7721 }}
+           package: deploy  # デプロイするパッケージのパスを指定
            type: zip      # ZIPデプロイメント方式を明示
            clean: true    # クリーンデプロイ
  
