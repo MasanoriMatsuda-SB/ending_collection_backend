@@ -50,7 +50,7 @@
        # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
  
        - name: Zip artifact for deployment
-         run: zip release.zip ./* -r    (コメント：旧方式。Zipファイルを下記の通り限定することで軽量化⇒デプロイ確認でき次第、要削除）
+         run: zip release.zip ./* -r    #(コメント：旧方式。Zipファイルを下記の通り限定することで軽量化⇒デプロイ確認でき次第、要削除）
          #run: zip -r release.zip app requirements.txt -x "**/__pycache__/*" -x "**/.git/*" -x "venv/*"
  
        - name: Upload artifact for deployment jobs
