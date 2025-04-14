@@ -76,6 +76,14 @@
  
        - name: Unzip artifact for deployment
          run: unzip release.zip
+
+         # デプロイ前にクリーンアップ
+       - name: Clean before deploy
+         run: |
+           find . -type d -name "__pycache__" -exec rm -rf {} +
+           find . -type f -name "*.pyc" -delete
+           find . -type f -name "*.pyo" -delete
+           find . -type f -name "*.pyd" -delete
        
        - name: 'Deploy to Azure Web App'
          uses: azure/webapps-deploy@v3
@@ -84,7 +92,8 @@
            app-name: 'asp-techno-deploy'
            slot-name: 'Production'
            publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_A37CB9F51D47412BB5F093B51D3E7721 }}
-           compression-level: 1    # Azure Webapps-deployの圧縮レベルを1に設定し、圧縮処理にかかるメモリを削減
+           type: zip      # ZIPデプロイメント方式を明示
+           clean: true    # クリーンデプロイ
  
        - name: Wait for deployment to stabilize
          run: sleep 30
