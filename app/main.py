@@ -1,15 +1,20 @@
 import os
 import uuid
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import NoResultFound
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from typing import List
 
-from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage, ReferenceItems, ReferenceMarketItem, MessageReaction, FamilyGroup, UserFamilyGroup
+from app.models import (
+    User, Thread, Message, MessageAttachment, Category, 
+    Item, ItemImage, ReferenceItems, ReferenceMarketItem, 
+    MessageReaction, FamilyGroup, UserFamilyGroup, GroupInvite, FamilyGroup
+)
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
     MessageCreate, MessageResponse, AttachmentType, 
@@ -18,7 +23,8 @@ from app.schemas import (
     MessageReaction as MessageReactionSchema, MessageReactionCreate, ThreadCreate,
     CategoryResponse, ItemCreate, ItemResponse, ItemUpdate,
     ConditionRank, ImageAnalysisResponse,
-    ItemImageResponse, ItemWithUsername, ReferenceItemsResponse, MarketPriceList
+    ItemImageResponse, ItemWithUsername, ReferenceItemsResponse, MarketPriceList,
+    GroupResponse, GroupInviteResponse, InviteAcceptResponse, InviteAcceptRequest
 )
 from app.utils import (
     get_password_hash, 
@@ -238,6 +244,177 @@ def create_group(
 
 # ====== Grouping（end） ======
 
+# ====== invite（start） ======
+# グループにユーザーを招待するための「一意な招待リンク」を生成するAPI 
+@fastapi_app.post("/group-invites", response_model=GroupInviteResponse)
+def create_group_invite(
+    group_id: int = Body(..., embed=True), # 招待対象のグループのID（フロントからPOSTボディで渡される）
+    db: Session = Depends(get_db),
+    request: Request = None # 認証ユーザー情報（JWTミドルウェアで埋め込まれている前提）
+):
+    if not hasattr(request.state, "user"): # 認証済みのユーザーであるかを確認
+        raise HTTPException(status_code=401, detail="認証情報が見つかりません")
+    
+    user_id = request.state.user.get("user_id") # トークンの中に user_id がなければ401 Unauthorized を返す
+    if not user_id:
+        raise HTTPException(status_code=401, detail="トークンに user_id が含まれていません")
+
+    # すでに招待リンクを発行済みか確認（必要なら有効なもののみ）
+    existing_invite = (
+        db.query(GroupInvite)
+        .filter(
+            GroupInvite.group_id == group_id,
+            GroupInvite.inviter_user_id == user_id,
+            GroupInvite.used == False,
+            GroupInvite.expires_at > datetime.utcnow()
+        )
+        .first()
+    )
+    if existing_invite:
+        return existing_invite # 有効なリンクがあるなら、再取得して再表示
+
+    # トークンを発行
+    token = str(uuid.uuid4()) # 一意なトークンを生成
+    expires_at = datetime.utcnow() + timedelta(days=7)  # トークンの有効期限は7日間
+
+    # 招待情報（グループID、トークン、作成者のuser_id、有効期限）をデータベースに保存
+    invite = GroupInvite(
+        group_id=group_id,
+        token=token,
+        inviter_user_id=user_id,
+        expires_at=expires_at
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+
+    return invite
+
+# トークン認証されたユーザー（request.state.user）から user_id を取得
+# user_family_groups テーブルからgroup_id を返すAPI
+@fastapi_app.get("/my-groups", response_model=List[GroupResponse])
+def get_my_group(
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    # 認証情報チェック
+    if not hasattr(request.state, "user"):
+        raise HTTPException(status_code=401, detail="認証情報が見つかりません")
+    
+    user_id = request.state.user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="トークンに user_id が含まれていません")
+
+    # ユーザーが所属している全グループを取得
+    groups = (
+        db.query(FamilyGroup)
+        .join(UserFamilyGroup, FamilyGroup.group_id == UserFamilyGroup.group_id)
+        .filter(UserFamilyGroup.user_id == user_id)
+        .all()
+    )
+
+    if not groups:
+        raise HTTPException(status_code=404, detail="所属グループが見つかりません")
+
+    return groups
+
+# 招待プレビュー
+@fastapi_app.get("/group-invites/preview", response_model=InviteAcceptResponse)
+def preview_invite_token(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    if not hasattr(request.state, "user"):
+        raise HTTPException(status_code=401, detail="認証情報が見つかりません")
+    user_id = request.state.user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="トークンに user_id が含まれていません")
+
+    invite = db.query(GroupInvite).filter(GroupInvite.token == token).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="招待トークンが無効です")
+    if invite.expires_at and invite.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="この招待リンクは期限切れです")
+
+    inviter = db.query(User).filter(User.user_id == invite.inviter_user_id).first()
+    group = db.query(FamilyGroup).filter(FamilyGroup.group_id == invite.group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="グループが存在しません")
+
+    already_member = db.query(UserFamilyGroup).filter_by(user_id=user_id).first()
+
+    return InviteAcceptResponse(
+        group_id=group.group_id,
+        group_name=group.group_name,
+        inviter_name=inviter.username if inviter else "不明",
+        already_in_group=already_member is not None
+    )
+
+# 招待リンク処理エンドポイント（ログイン後にフロントから叩かれる想定）
+# GroupResponse（Grouping Schema）に沿ってgroup_idとgroup_nameを返す
+@fastapi_app.post("/group-invites/accept", response_model=InviteAcceptResponse)
+def accept_invite_token(
+    req: InviteAcceptRequest,
+    db: Session = Depends(get_db),
+    request: Request = None # 認証情報をミドルウェアでセットされた request.state.user から取得
+):
+    try:
+        token = req.token
+
+        # 認証情報からuser_idを取得
+        if not hasattr(request.state, "user"): # トークンが正しくデコードされて request.state.user にJWT認証情報がない場合はエラー
+            raise HTTPException(status_code=401, detail="認証情報が見つかりません")
+        user_id = request.state.user.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="トークンに user_id が含まれていません")
+
+        # 招待トークンを検証 招待テーブルから一致する token を持つレコードを探す
+        invite = db.query(GroupInvite).filter(GroupInvite.token == token).first()
+        if not invite: # トークンが存在するか
+            raise HTTPException(status_code=404, detail="招待トークンが無効です")
+        if invite.used:# すでに使用済みか
+            raise HTTPException(status_code=400, detail="この招待リンクは既に使用されています")
+        if invite.expires_at and invite.expires_at < datetime.utcnow(): # 有効期限切れか
+            raise HTTPException(status_code=400, detail="この招待リンクは期限切れです")
+
+        # グループ参加チェック
+        already_member = db.query(UserFamilyGroup).filter_by(user_id=user_id, group_id=invite.group_id).first()
+        if already_member:
+            return InviteAcceptResponse(
+                group_id=invite.group_id,
+                group_name=invite.group.group_name,
+                inviter_name=invite.inviter.username if invite.inviter else "不明",
+                already_in_group=True
+            )
+
+        # まだ未参加なら追加
+        user_group = UserFamilyGroup(user_id=user_id, group_id=invite.group_id, role="viewer")
+        db.add(user_group)
+
+        # 招待リンクを使用済みに更新
+        invite.invited_user_id = user_id # 誰が使ったか記録
+        invite.used = True # 使用済みフラグを立てることで二重使用の防止
+        invite.used_at = datetime.utcnow() # 使用時間を記録
+        db.commit()
+
+        # # 招待者ユーザー取得
+        # inviter = db.query(User).filter(User.user_id == invite.inviter_user_id).first()
+        # # グループ情報返却 招待に紐づくグループ情報を取得し、GroupResponse として返却
+        # group = db.query(FamilyGroup).filter(FamilyGroup.group_id == invite.group_id).first()
+        return InviteAcceptResponse(
+            group_id=invite.group_id,
+            group_name=invite.group_name,
+            inviter_name=invite.inviter.username if invite.inviter else "不明",
+            already_in_group=False
+        )
+
+    except Exception as e:
+        logger.error(f"/group-invites/accept で例外発生: {e}")
+        raise HTTPException(status_code=500, detail="招待リンクの処理に失敗しました")
+
+
+# ====== invite（end） ======
 
 # item_id → thread_id
 @fastapi_app.get("/threads/by-item/{item_id}")

@@ -29,6 +29,27 @@ class UserFamilyGroup(Base):
     role = Column(SqlEnum("poster", "viewer", name="user_role_enum"), nullable=False)
     joined_at = Column(TIMESTAMP, server_default=func.now())
 
+# 招待者管理テーブル
+class GroupInvite(Base):
+    __tablename__ = "group_invites"
+
+    invite_id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(Integer, ForeignKey("family_groups.group_id", ondelete="CASCADE"), nullable=False)
+    token = Column(String(255), unique=True, nullable=False)
+    inviter_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"))
+    invited_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"))
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    expires_at = Column(TIMESTAMP, nullable=True)
+    used_at = Column(TIMESTAMP, nullable=True)
+    used = Column(Boolean, default=False)
+
+    # リレーション
+    inviter = relationship("User", foreign_keys=[inviter_user_id], backref="sent_invites")
+    invited = relationship("User", foreign_keys=[invited_user_id], backref="received_invites")
+    group = relationship("FamilyGroup", backref="invites")
+
+
+
 class Thread(Base):
     __tablename__ = "threads"
 

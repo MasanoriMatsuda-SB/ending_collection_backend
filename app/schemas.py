@@ -40,6 +40,40 @@ class GroupResponse(BaseModel):
     class Config:
         from_attributes = True
 # ====== Grouping Schema（end） ====== 
+# ====== invite関連Schema（Start） ======
+class GroupInviteCreate(BaseModel):
+    group_id: int
+    token: str
+    inviter_user_id: Optional[int] = None
+    expires_at: Optional[datetime] = None
+
+class GroupInviteResponse(BaseModel):
+    invite_id: int
+    group_id: int
+    token: str
+    inviter_user_id: Optional[int]
+    invited_user_id: Optional[int]
+    created_at: datetime
+    expires_at: Optional[datetime]
+    used_at: Optional[datetime]
+    used: bool
+
+    class Config:
+        from_attributes = True
+
+class InviteAcceptRequest(BaseModel):
+    token: str
+
+class InviteAcceptResponse(BaseModel):
+    group_id: int
+    group_name: str
+    inviter_name: str
+    already_in_group: bool
+
+    class Config:
+        from_attributes = True
+
+# ====== invite関連Schema（end） ======
 
 # ====== Chat関連Schema（Start） ====== 
 class MessageCreate(BaseModel):
