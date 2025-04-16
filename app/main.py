@@ -199,6 +199,19 @@ def create_group(
         if not user_id:
             raise HTTPException(status_code=401, detail="トークンに user_id が含まれていません")
 
+        # ✅ すでに同じユーザーが同名のグループを持っているかチェック
+        existing_group = (
+            db.query(FamilyGroup)
+            .join(UserFamilyGroup, FamilyGroup.group_id == UserFamilyGroup.group_id)
+            .filter(
+                FamilyGroup.group_name == groupName,
+                UserFamilyGroup.user_id == user_id
+            )
+            .first()
+        )
+        if existing_group:
+            raise HTTPException(status_code=400, detail="同じ名前のグループはすでに作成されています")
+
         # family_groups に追加
         new_group = FamilyGroup(group_name=groupName)
         db.add(new_group)
