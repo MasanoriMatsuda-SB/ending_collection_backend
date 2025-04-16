@@ -88,7 +88,7 @@ ultralytics==8.3.100
 ultralytics-thop==2.0.14
 urllib3==2.3.0
 uvicorn==0.34.0
-python-socketio==5.12.1
+#python-socketio==5.12.1 #重複してます
 openai>=1.0.0
 #chromadb==0.4.24
 watchfiles==1.0.4
