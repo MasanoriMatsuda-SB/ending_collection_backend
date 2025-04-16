@@ -94,7 +94,7 @@
            publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_A37CB9F51D47412BB5F093B51D3E7721 }}
            package: release.zip   # ZIPファイルを指定
            type: zip      # ZIPデプロイメント方式を明示
-           clean: true    # クリーンデプロイ
+           clean: false    # キャッシュを利用し負荷を低減
  
        - name: Wait for deployment to stabilize
          run: sleep 30
