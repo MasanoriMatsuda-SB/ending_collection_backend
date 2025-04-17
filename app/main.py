@@ -2,20 +2,20 @@ import os
 import uuid
 import logging
 from datetime import timedelta
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request, Query
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from typing import List
 
-from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage, ReferenceItems, ReferenceMarketItem
+from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage, ReferenceItems, ReferenceMarketItem, MessageReaction, FamilyGroup, UserFamilyGroup
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
     MessageCreate, MessageResponse, AttachmentType, 
     MessageAttachmentBase, MessageAttachmentCreate, 
     MessageAttachment as MessageAttachmentSchema,
-    MessageReaction, MessageReactionCreate,
+    MessageReaction as MessageReactionSchema, MessageReactionCreate, ThreadCreate,
     CategoryResponse, ItemCreate, ItemResponse, ItemUpdate,
     ConditionRank, ImageAnalysisResponse,
     ItemImageResponse, ItemWithUsername, ReferenceItemsResponse, MarketPriceList
@@ -26,11 +26,11 @@ from app.utils import (
     validate_image,
     ItemRecognitionService
 )
-from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from app.auth import create_access_token, decode_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.dependencies import get_db
 from app.crud import (
     create_message, get_messages, delete_message, 
-    create_reaction, get_reactions_by_message, delete_reaction,
+    create_reaction, get_reactions_by_message, delete_reaction, create_thread, get_messages_by_item_id,
     get_categories, create_item, get_item,
     get_user_items, get_group_items, update_item,
     delete_item
@@ -180,12 +180,63 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-## モックサーバー
-## 仮のグループ作成エンドポイント（モック）
-#@app.post("/grouping")
-#async def mock_create_group(payload: GroupCreate):
-    #group_name = payload.groupName
-    #return {"message": f"グループ '{group_name}' を作成しました"}
+# ====== Grouping（Start） ======
+# JWT認証情報からuser_idを取得し、request.state.userに埋め込む
+@fastapi_app.middleware("http")
+async def add_user_to_request(request: Request, call_next):
+    token = request.headers.get("Authorization") # ヘッダーから Authorization を取得
+    if token and token.startswith("Bearer "):
+        try:
+            token_data = decode_access_token(token[7:])  # Authorization: Bearer <JWTトークン>から"Bearer "除去
+            request.state.user = token_data  # request.state.user["user_id"] で使える
+            logger.info(f"✅ user_id: {token_data.get('user_id')}")
+        except Exception as e:
+            logger.warning(f"トークンの解析に失敗しました: {e}")
+    return await call_next(request) # 次の処理（通常のエンドポイント関数）に制御を渡す
+
+# Group新規作成エンドポイント
+@fastapi_app.post("/grouping")
+def create_group(
+    groupName: str = Body(..., embed=True), # グループ名を受け取る。embed=Trueは"groupName" のキーを期待
+    db: Session = Depends(get_db),
+    request: Request = None  # 認証情報からuser_idを取得する
+):
+    try:
+        if not hasattr(request.state, "user"):
+            raise HTTPException(status_code=401, detail="認証情報が見つかりません（ミドルウェア未通過）")
+        
+        # 認証済みユーザーの取得（JWTから）「誰がグループを作成したか」をDBに記録
+        token_data = request.state.user  # middlewareエンドポイント
+        user_id = token_data.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="トークンに user_id が含まれていません")
+
+        # family_groups に追加
+        new_group = FamilyGroup(group_name=groupName)
+        db.add(new_group)
+        db.commit()
+        db.refresh(new_group)
+
+        # user_family_groups に作成者を追加。role: poster（投稿者という役割を記録）
+        user_group = UserFamilyGroup(user_id=user_id, group_id=new_group.group_id, role="poster")
+        db.add(user_group)
+        db.commit()
+
+        return {
+            "message": "グループ作成に成功しました",
+            "group_id": new_group.group_id,
+            "group_name": new_group.group_name
+        }
+
+    except Exception as e:
+        logger.warning(f"認証または処理エラー: {e.detail}")# 401などの明示的なHTTPエラーはそのまま返す
+        raise e
+    except Exception as e:
+        logger.error(f"グループ作成失敗: {e}")
+        raise HTTPException(status_code=500, detail="グループ作成中にエラーが発生しました")
+
+# ====== Grouping（end） ======
+
 
 # item_id → thread_id
 @fastapi_app.get("/threads/by-item/{item_id}")
@@ -317,15 +368,17 @@ def delete_message_endpoint(message_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Message not found")
     return {"detail": "Message deleted"}
 
-# ====== Chat リアクション対応 ======
-@fastapi_app.post("/reactions", response_model=MessageReaction)
+
+# ====== Chat リアクション対応（Start） ====== 
+@fastapi_app.post("/reactions", response_model=MessageReactionSchema)
 def add_reaction(
     reaction: MessageReactionCreate,
     db: Session = Depends(get_db)
 ):
     return create_reaction(db, reaction)
 
-@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReaction])
+
+@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReactionSchema])
 def get_reactions(message_id: int, db: Session = Depends(get_db)):
     return get_reactions_by_message(db, message_id)
 
@@ -337,6 +390,42 @@ def remove_reaction(
 ):
     delete_reaction(db, message_id, user_id)
     return {"message": "Reaction removed"}
+# ====== Chat リアクション対応（EndEnd） ====== 
+
+# ====== Thread作成エンドポイント（Start） ====== 
+@fastapi_app.post("/threads")
+def create_new_thread(thread: ThreadCreate, db: Session = Depends(get_db)):
+    try:
+        new_thread = create_thread(db, thread)
+        return {"thread_id": new_thread.thread_id}
+    except Exception as e:
+        logger.error(f"スレッド作成失敗: {e}")
+        raise HTTPException(status_code=500, detail="スレッド作成中にエラーが発生しました")
+# ====== Thread作成エンドポイント（End） ====== 
+
+
+# ====== RAG関連エンドポイント（Start） ====== 
+# @fastapi_app.get("/rag/summary/{item_id}")
+# def get_summary(item_id: str, db: Session = Depends(get_db)):
+#     messages = get_messages_by_item_id(db, item_id)
+#     text = "\n".join([m.content for m in messages])
+#     summary = chat_llm_summarize(text)  # LLM API 連携関数
+#     return {"summary": summary}
+
+# # Step5 - ベクトル登録 & 検索エンドポイント
+# @fastapi_app.post("/rag/index/{item_id}")
+# def index_for_item(item_id: str, db: Session = Depends(get_db)):
+#     index_messages_for_item(db, item_id)
+#     return {"message": "インデックス作成完了"}
+
+# @fastapi_app.get("/rag/vector_search/{item_id}")
+# def vector_search_chat(item_id: str, query: str):
+#     results = search_chat_vector(item_id, query)
+#     return {"results": results}
+
+# ====== RAG関連エンドポイント（End） ====== 
+
+
 
 # ====== Item関連エンドポイント ======
 @fastapi_app.get("/categories", response_model=List[CategoryResponse])
@@ -690,20 +779,6 @@ async def delete_item_by_id(item_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Item not found")
     return {"detail": "Item successfully deleted"}
 
-# ====== Chat リアクション対応 ======
-@fastapi_app.post("/reactions", response_model=MessageReaction)
-def add_reaction(reaction: MessageReactionCreate, db: Session = Depends(get_db)):
-    return create_reaction(db, reaction)
-
-@fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReaction])
-def get_reactions(message_id: int, db: Session = Depends(get_db)):
-    return get_reactions_by_message(db, message_id)
-
-@fastapi_app.delete("/reactions")
-def remove_reaction(message_id: int, user_id: int, db: Session = Depends(get_db)):
-    delete_reaction(db, message_id, user_id)
-    return {"message": "Reaction removed"}
-
 # ====== アイテム詳細画面（Start） ======
 # ItemDetail.tsx対応（パス変更後）
 @fastapi_app.get("/items/detail/{item_id}", response_model=ItemWithUsername)
@@ -776,7 +851,14 @@ def get_market_prices(
     return {"market_prices": prices}
 # ====== アイテム詳細画面（End） ======
 
-# ====== 起動ポイント ======
+
+# ====== メルカリスクレイピング（start） ======
+
+
+# ====== メルカリスクレイピング（end） ======
+
+#  起動ポイント変更
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

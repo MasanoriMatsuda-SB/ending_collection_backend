@@ -18,7 +18,8 @@ from app.schemas import (
     MessageReactionCreate,
     ItemCreate,
     CategoryCreate,
-    ItemUpdate
+    ItemUpdate,
+    ThreadCreate
 )
 from app.services.blob import delete_blob_by_url
 
@@ -59,11 +60,28 @@ def delete_message(db: Session, message_id: int):
 
 # =====Chatreaction関連CRUD(Start)=====
 def create_reaction(db: Session, reaction: MessageReactionCreate):
-    db_reaction = MessageReaction(**reaction.dict())
-    db.add(db_reaction)
-    db.commit()
-    db.refresh(db_reaction)
-    return db_reaction
+    # すでに同じユーザーのリアクションが存在するか確認
+    existing = db.query(MessageReaction).filter(
+        MessageReaction.message_id == reaction.message_id,
+        MessageReaction.user_id == reaction.user_id
+    ).first()
+
+    if existing:
+        # 同じリアクションタイプの場合は何もしない
+        if existing.reaction_type == reaction.reaction_type:
+            return existing
+        # 違うリアクションなら更新
+        existing.reaction_type = reaction.reaction_type
+        db.commit()
+        db.refresh(existing)
+        return existing
+    else:
+        # なければ新規作成
+        db_reaction = MessageReaction(**reaction.dict())
+        db.add(db_reaction)
+        db.commit()
+        db.refresh(db_reaction)
+        return db_reaction
 
 def get_reactions_by_message(db: Session, message_id: int):
     return db.query(MessageReaction).filter(
@@ -77,6 +95,30 @@ def delete_reaction(db: Session, message_id: int, user_id: int):
     ).delete()
     db.commit()
 # =====Chatreaction関連CRUD(End)=====
+
+# ====== ChatReaction関連CRUD（End） ====== 
+
+
+# ====== threads 作成関数CRUD（Start） ====== 
+def create_thread(db: Session, thread: ThreadCreate):
+    new_thread = Thread(**thread.dict())
+    db.add(new_thread)
+    db.commit()
+    db.refresh(new_thread)
+    return new_thread
+# ====== threads 作成関数CRUD（End） ====== 
+
+
+# ====== RAG関連CRUD（Start） ====== 
+def get_messages_by_item_id(db: Session, item_id: str) -> list[Message]:
+    return (
+        db.query(Message)
+        .filter(Message.thread.has(item_id=item_id))  # Threadの外部キーを利用
+        .order_by(Message.created_at)
+        .all()
+    )
+# ====== RAG関連CRUD（End） ====== 
+
 
 # =====Item関連CRUD(Start)=====
 # カテゴリー関連CRUD
