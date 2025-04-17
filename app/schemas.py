@@ -173,7 +173,7 @@ class ImageAnalysisResponse(BaseModel):
 
 # ====== アイテム詳細画面（Start） ======
 # ItemDetail.tsx対応
-class ItemResponse(BaseModel):
+""" class ItemResponse(BaseModel):
     item_id: int
     user_id: int
     item_name: str
@@ -185,7 +185,7 @@ class ItemResponse(BaseModel):
     updated_at: datetime
 
     class Config:
-        from_attributes = True
+        from_attributes = True """
 
 class ItemWithUsername(ItemResponse):
     username: str

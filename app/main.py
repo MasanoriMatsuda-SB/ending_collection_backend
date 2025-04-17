@@ -23,6 +23,7 @@ from app.schemas import (
 from app.utils import (
     get_password_hash, 
     verify_password,
+    validate_image,
     ItemRecognitionService
 )
 from app.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -35,6 +36,19 @@ from app.crud import (
     delete_item
 )
 import socketio
+
+from openai import AzureOpenAI
+import base64
+from fastapi import Body
+from fastapi.responses import StreamingResponse
+import httpx
+
+# Azure OpenAI の設定
+client = AzureOpenAI(
+  api_key = os.getenv("AZURE_OPENAI_KEY"),  
+  api_version = "2024-03-01-preview",
+  azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+)
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -330,6 +344,112 @@ async def list_categories(db: Session = Depends(get_db)):
     """カテゴリー一覧を取得"""
     return get_categories(db)
 
+@fastapi_app.post("/items/openai_analyze", response_model=ImageAnalysisResponse)
+async def openai_analyze_item_image(image: UploadFile = File(...)) -> ImageAnalysisResponse:
+    try:
+        # アップロードされた画像データを読み込み
+        image_data = await image.read()
+        # 画像データをBase64にエンコードし、Data URL形式に変換する
+        base64_encoded = base64.b64encode(image_data).decode("utf-8")
+        data_url = f"data:{image.content_type};base64,{base64_encoded}"
+        
+        # 画像を表す辞書（OpenAIのマルチモーダル入力形式）を作成
+        image_dict = {
+            "type": "image_url",
+            "image_url": {
+                "url": data_url,
+                "detail": "high"
+            }
+        }
+        
+        # リクエストメッセージを構築
+        messages = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": "あなたは商品名識別の専門家です。"}]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "画像に最も大きく写っている物の具体的な商品名を提示ください。商品名のみを回答ください。例：大神 (OKAMI) オリジナル・サウンドトラック"},
+                    image_dict
+                ]
+            }
+        ]
+        
+        # チャットコンプリーションを呼び出す
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=300,
+        )
+        
+        detected_name = response.choices[0].message.content.strip()
+        result = {"detected_name": detected_name, "confidence": None}
+        return ImageAnalysisResponse(**result)
+    
+    except Exception as e:
+        logger.error(f"Azure OpenAI 画像解析に失敗: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+@fastapi_app.post("/items/openai_analyze_batch")
+async def openai_analyze_batch(image_urls: List[str] = Body(...)) -> List[dict]:
+    
+    results = []
+    for url in image_urls:
+        try:
+            # 画像URLから画像データを取得
+            async with httpx.AsyncClient() as client_http:
+                resp = await client_http.get(url)
+                resp.raise_for_status()
+            image_data = resp.content
+            # Base64エンコードしてData URL形式に変換（画像のMIMEタイプはここでは "image/jpeg" と仮定）
+            base64_encoded = base64.b64encode(image_data).decode("utf-8")
+            data_url = f"data:image/jpeg;base64,{base64_encoded}"
+            # OpenAI用の画像入力形式の辞書を作成
+            image_dict = {
+                "type": "image_url",
+                "image_url": {
+                    "url": data_url,
+                    "detail": "high"
+                }
+            }
+            # リクエストメッセージを構築
+            messages = [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": "あなたは商品名識別の専門家です。"}]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "画像に最も大きく写っている物の具体的な商品名を、商品名のみで回答してください。"
+                        },
+                        image_dict
+                    ]
+                }
+            ]
+            # Azure OpenAI Service のチャットAPIを呼び出し
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",  # Azure OpenAI Serviceにデプロイしているモデルの名前に置き換えてください
+                messages=messages,
+                max_tokens=10,
+            )
+            detected_name = response.choices[0].message.content.strip()
+            results.append({
+                "image_url": url,
+                "detected_name": detected_name
+            })
+        except Exception as e:
+            logger.error(f"Azure OpenAI バッチ解析に失敗 (URL: {url}): {e}")
+            results.append({
+                "image_url": url,
+                "detected_name": "解析失敗"
+            })
+    return results
+
 @fastapi_app.post("/items/analyze")
 async def analyze_item_image(
     image: UploadFile = File(...)
@@ -341,6 +461,72 @@ async def analyze_item_image(
         return ImageAnalysisResponse(**result)
     except Exception as e:
         logger.error(f"画像分析に失敗: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@fastapi_app.post("/items/yolo_detect")
+async def yolo_detect(image: UploadFile = File(...)) -> List[dict]:
+    """
+    アップロードされた画像からYOLOによる物体検出を行い、
+    各検出領域を切り出してAzure Blob StorageにアップロードしたURLなどを返すエンドポイント。
+    """
+    try:
+        # アップロードされた画像データを読み込む
+        image_data = await image.read()
+        
+        # 画像データの検証（utils.py の validate_image 関数を利用する例）
+        if not validate_image(image_data):
+            raise HTTPException(status_code=400, detail="画像データが不正です")
+        
+        # 画像データをNumPy配列に変換し、OpenCVで画像をデコード
+        import cv2
+        import numpy as np
+        nparr = np.frombuffer(image_data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # YOLOモデルで検出を実行（ItemRecognitionServiceのmodelを利用）
+        results = item_recognition_service.model(img)[0]
+        
+        detections = []
+        idx = 1
+        # 検出結果のボックス情報の一覧を取得
+        for r in results.boxes.data.tolist():
+            x1, y1, x2, y2, score, class_id = r
+            # 座標を整数に変換
+            x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+            # 切り出し（元画像が十分大きいことを前提とする）
+            cropped = img[y1:y2, x1:x2]
+            # 切り出した画像をJPEG形式でエンコード
+            ret, buf = cv2.imencode(".jpg", cropped)
+            if not ret:
+                continue
+            cropped_bytes = buf.tobytes()
+            # Azure Blob Storageに切り出し画像をアップロード（upload_imageメソッドを利用）
+            crop_url = await item_recognition_service.upload_image(cropped_bytes, content_type="image/jpeg")
+            # 検出結果にID、URL、クラス名、信頼度を付与してリストに追加
+            detections.append({
+                "id": idx,
+                "crop_image_url": crop_url,
+                "class_name": results.names[int(class_id)],
+                "confidence": float(score)
+            })
+            idx += 1
+        
+        return detections
+
+    except Exception as e:
+        logger.error(f"YOLO検出に失敗: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@fastapi_app.get("/proxy_image")
+async def proxy_image(url: str = Query(...)):
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, follow_redirects=True)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail="画像取得に失敗しました")
+        return StreamingResponse(iter([response.content]), media_type=response.headers.get("content-type", "application/octet-stream"))
+    except Exception as e:
+        logger.error(f"Proxy image fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @fastapi_app.post("/items", response_model=ItemResponse)
