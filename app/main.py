@@ -18,7 +18,8 @@ from app.schemas import (
     MessageReaction as MessageReactionSchema, MessageReactionCreate, ThreadCreate,
     CategoryResponse, ItemCreate, ItemResponse, ItemUpdate,
     ConditionRank, ImageAnalysisResponse,
-    ItemImageResponse, ItemWithUsername, ReferenceItemsResponse, MarketPriceList
+    ItemImageResponse, ItemWithUsername, ReferenceItemsResponse, MarketPriceList,
+    GroupResponse
 )
 from app.utils import (
     get_password_hash, 
@@ -797,13 +798,24 @@ def get_item_with_username(item_id: int, db: Session = Depends(get_db)):
     return ItemWithUsername(
         item_id=item_obj.item_id,
         user_id=item_obj.user_id,
+        group_id=item_obj.group_id,
         item_name=item_obj.item_name,
         description=item_obj.description,
         ref_item_id=item_obj.ref_item_id,
         category_id=item_obj.category_id,
+        category_name=item_obj.category.category_name if item_obj.category else "",
         condition_rank=item_obj.condition_rank,
         status=item_obj.status,
+        created_at=item_obj.created_at,
         updated_at=item_obj.updated_at,
+        images=[
+            {
+                "image_id": img.image_id,
+                "image_url": img.image_url,
+                "uploaded_at": img.uploaded_at
+            }
+            for img in item_obj.images or []  # None安全
+        ],
         username=username
     )
 
@@ -856,6 +868,68 @@ def get_market_prices(
 
 
 # ====== メルカリスクレイピング（end） ======
+
+# ====== ホーム app/page.tsx（start） ======
+
+@fastapi_app.get("/users/{user_id}/groups", response_model=List[GroupResponse])
+def get_user_groups(user_id: int, db: Session = Depends(get_db)):
+    user_groups = (
+        db.query(UserFamilyGroup.group_id, FamilyGroup.group_name)
+        .join(FamilyGroup, UserFamilyGroup.group_id == FamilyGroup.group_id)
+        .filter(UserFamilyGroup.user_id == user_id)
+        .all()
+    )
+    return [{"group_id": gid, "group_name": name} for gid, name in user_groups]
+
+
+# メッセージの新しい順
+@fastapi_app.get("/items/group/{group_id}/with-latest-message")
+def get_items_with_latest_message(group_id: int, db: Session = Depends(get_db)):
+    from sqlalchemy import func
+
+    subquery = (
+        db.query(Message.thread_id, func.max(Message.updated_at).label("latest"))
+        .group_by(Message.thread_id)
+        .subquery()
+    )
+
+    results = (
+        db.query(Item, subquery.c.latest)
+        .outerjoin(Thread, Item.item_id == Thread.item_id)
+        .outerjoin(subquery, Thread.thread_id == subquery.c.thread_id)
+        .filter(Item.group_id == group_id)
+        .all()
+    )
+
+    response = []
+    for item, latest in results:
+        response.append({
+            "item_id": item.item_id,
+            "item_name": item.item_name,
+            "updated_at": item.updated_at,
+            "images": [{"image_url": img.image_url} for img in item.images],
+            "latest_message_time": latest
+        })
+
+    return response
+
+# メッセージの検索
+@fastapi_app.get("/group-messages/{group_id}")
+def get_messages_for_group(group_id: int, db: Session = Depends(get_db)):
+    """group_idに属するitemに紐づくmessage contentのみを返す"""
+    results = (
+        db.query(Message.thread_id, Message.content)
+        .join(Thread, Message.thread_id == Thread.thread_id)
+        .join(Item, Thread.item_id == Item.item_id)
+        .filter(Item.group_id == group_id)
+        .all()
+    )
+    return [{"thread_id": t_id, "content": content} for t_id, content in results]
+
+
+
+# ====== ホーム app/page.tsx（end） ======
+
 
 #  起動ポイント変更
 

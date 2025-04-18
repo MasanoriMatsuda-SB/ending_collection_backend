@@ -160,7 +160,13 @@ class ItemImage(BaseModel):
 class ItemResponse(ItemBase):
     item_id: int
     user_id: int
-    status: ItemStatus
+    group_id: int
+    ref_item_id: Optional[int] = None
+    category_id: Optional[int] = None
+    item_name: str
+    description: Optional[str] = None
+    condition_rank: Optional[str] = None
+    status: ItemStatus = None
     created_at: datetime
     updated_at: Optional[datetime]
     category_name: str
@@ -185,19 +191,6 @@ class ImageAnalysisResponse(BaseModel):
 
 # ====== アイテム詳細画面（Start） ======
 # ItemDetail.tsx対応
-""" class ItemResponse(BaseModel):
-    item_id: int
-    user_id: int
-    item_name: str
-    description: Optional[str]
-    ref_item_id: Optional[int] = None
-    category_id: Optional[int]
-    condition_rank: Optional[str]
-    status: str
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True """
 
 class ItemWithUsername(ItemResponse):
     username: str
