@@ -882,7 +882,7 @@ def get_user_groups(user_id: int, db: Session = Depends(get_db)):
     return [{"group_id": gid, "group_name": name} for gid, name in user_groups]
 
 
-# メッセージの新しい順に並び替え
+# メッセージの新しい順に並び替
 @fastapi_app.get("/items/group/{group_id}/with-latest-message")
 def get_items_with_latest_message(group_id: int, db: Session = Depends(get_db)):
     from sqlalchemy import func
