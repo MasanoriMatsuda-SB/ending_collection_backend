@@ -359,6 +359,8 @@ def accept_invite_token(
     db: Session = Depends(get_db),
     request: Request = None # 認証情報をミドルウェアでセットされた request.state.user から取得
 ):
+    logger.info(f"💡 /group-invites/accept にリクエストが届きました: {req}")
+
     try:
         token = req.token
 
@@ -369,6 +371,12 @@ def accept_invite_token(
         if not user_id:
             raise HTTPException(status_code=401, detail="トークンに user_id が含まれていません")
 
+        # 1人1グループ制限チェック。将来的には外す
+        existing_membership = db.query(UserFamilyGroup).filter_by(user_id=user_id).first()
+        if existing_membership:
+            raise HTTPException(status_code=400, detail="すでに別のグループに所属しているため参加できません")
+
+
         # 招待トークンを検証 招待テーブルから一致する token を持つレコードを探す
         invite = db.query(GroupInvite).filter(GroupInvite.token == token).first()
         if not invite: # トークンが存在するか
@@ -378,15 +386,14 @@ def accept_invite_token(
         if invite.expires_at and invite.expires_at < datetime.utcnow(): # 有効期限切れか
             raise HTTPException(status_code=400, detail="この招待リンクは期限切れです")
 
-        # グループ参加チェック
-        already_member = db.query(UserFamilyGroup).filter_by(user_id=user_id, group_id=invite.group_id).first()
-        if already_member:
-            return InviteAcceptResponse(
-                group_id=invite.group_id,
-                group_name=invite.group.group_name,
-                inviter_name=invite.inviter.username if invite.inviter else "不明",
-                already_in_group=True
-            )
+        # グループ情報取得
+        group = db.query(FamilyGroup).filter(FamilyGroup.group_id == invite.group_id).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="グループが見つかりません")
+
+        # 招待者取得（名前表示のため）
+        inviter = db.query(User).filter(User.user_id == invite.inviter_user_id).first()
+
 
         # まだ未参加なら追加
         user_group = UserFamilyGroup(user_id=user_id, group_id=invite.group_id, role="viewer")
