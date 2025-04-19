@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from typing import List
 
-from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage, ReferenceItems, ReferenceMarketItem, MessageReaction, FamilyGroup, UserFamilyGroup
+from app.models import User, Thread, Message, MessageAttachment, Category, Item, ItemImage, ReferenceItems, ReferenceMarketItem, MessageReaction, FamilyGroup, UserFamilyGroup, GroupInvite
 from app.schemas import (
     UserCreate, UserOut, UserLogin, Token,
     MessageCreate, MessageResponse, AttachmentType, 
@@ -19,7 +19,10 @@ from app.schemas import (
     CategoryResponse, ItemCreate, ItemResponse, ItemUpdate,
     ConditionRank, ImageAnalysisResponse,
     ItemImageResponse, ItemWithUsername, ReferenceItemsResponse, MarketPriceList,
-    GroupResponse
+    GroupResponse, GroupInviteCreate,
+    GroupInviteResponse,
+    AcceptInviteRequest,
+    AcceptInviteResponse,
 )
 from app.utils import (
     get_password_hash, 
@@ -34,7 +37,11 @@ from app.crud import (
     create_reaction, get_reactions_by_message, delete_reaction, create_thread, get_messages_by_item_id,
     get_categories, create_item, get_item,
     get_user_items, get_group_items, update_item,
-    delete_item
+    delete_item, create_group_invite,
+    get_group_invite_by_token,
+    accept_group_invite,
+    list_group_invites,
+    revoke_group_invite,
 )
 import socketio
 
@@ -929,6 +936,42 @@ def get_messages_for_group(group_id: int, db: Session = Depends(get_db)):
     )
     return [{"thread_id": t_id, "content": content} for t_id, content in results]
 # ====== ホーム app/page.tsx（end） ======
+
+# ===== 招待機能エンドポイント =====
+@fastapi_app.post("/invite/create", response_model=GroupInviteResponse)
+def invite_create(
+    body: GroupInviteCreate,
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    # JWTミドルウェアで request.state.user にペイロードが入る前提
+    user_id = request.state.user.get("user_id")
+    invite = create_group_invite(db, body.group_id, user_id, body.expires_at)
+    return invite
+
+@fastapi_app.post("/invite/accept", response_model=AcceptInviteResponse)
+def invite_accept(
+    body: AcceptInviteRequest,
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    invited_user_id = request.state.user.get("user_id")
+    invite = accept_group_invite(db, body.token, invited_user_id)
+    if not invite:
+        raise HTTPException(status_code=400, detail="無効または期限切れのトークンです")
+    return invite
+
+@fastapi_app.get("/invite/list/{group_id}", response_model=List[GroupInviteResponse])
+def invite_list(group_id: int, db: Session = Depends(get_db)):
+    return list_group_invites(db, group_id)
+
+@fastapi_app.delete("/invite/revoke/{invite_id}")
+def invite_revoke(invite_id: int, db: Session = Depends(get_db)):
+    ok = revoke_group_invite(db, invite_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="招待が見つかりません")
+    return {"message": "招待を取り消しました"}
+# ===== 招待機能エンドポイントここまで =====
 
 
 #  起動ポイント変更

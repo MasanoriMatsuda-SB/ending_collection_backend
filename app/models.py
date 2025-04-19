@@ -15,12 +15,34 @@ class User(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
+    # 送信した招待一覧
+    sent_invites = relationship(
+        "GroupInvite",
+        back_populates="inviter",
+        foreign_keys="[GroupInvite.inviter_user_id]",
+        cascade="all, delete-orphan"
+    )
+    # 受諾した（受け取った）招待一覧
+    received_invites = relationship(
+        "GroupInvite",
+        back_populates="invited",
+        foreign_keys="[GroupInvite.invited_user_id]",
+        cascade="all, delete-orphan"
+    )
+
 # Grouping
 class FamilyGroup(Base):
     __tablename__ = "family_groups"
     group_id = Column(Integer, primary_key=True, index=True)
     group_name = Column(String(100), nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
+
+    # このグループに対する招待一覧
+    invites = relationship(
+        "GroupInvite",
+        back_populates="group",
+        cascade="all, delete-orphan"
+    )
 
 class UserFamilyGroup(Base):
     __tablename__ = "user_family_groups"
@@ -167,3 +189,22 @@ class ReferenceMarketItem(Base):
     status = Column(String(50), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 # ====== アイテム詳細画面（End） ======
+
+# ====== グループ招待機能（Start） ======
+class GroupInvite(Base):
+    __tablename__ = "group_invites"
+    invite_id       = Column(Integer, primary_key=True, autoincrement=True)
+    group_id        = Column(Integer, ForeignKey("family_groups.group_id", ondelete="CASCADE"), nullable=False)
+    token           = Column(String(255), unique=True, nullable=False)
+    inviter_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    invited_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    created_at      = Column(TIMESTAMP, server_default=func.now())
+    expires_at      = Column(TIMESTAMP, nullable=True)
+    used_at         = Column(TIMESTAMP, nullable=True)
+    used            = Column(Boolean, default=False, nullable=False)
+
+    # リレーションシップ
+    group   = relationship("FamilyGroup", back_populates="invites")
+    inviter = relationship("User", back_populates="sent_invites",   foreign_keys=[inviter_user_id])
+    invited = relationship("User", back_populates="received_invites", foreign_keys=[invited_user_id])
+# ====== グループ招待機能（End） ======

@@ -181,3 +181,19 @@ CREATE TABLE message_attachments (
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- アップロード日時
     FOREIGN KEY (message_id) REFERENCES messages(message_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE group_invites (
+    invite_id INT PRIMARY KEY AUTO_INCREMENT,
+    group_id INT NOT NULL,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    inviter_user_id INT,  -- 誰が招待したか
+    invited_user_id INT,  -- 誰が招待を使ったか
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NULL,
+    used_at TIMESTAMP NULL,
+    used BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (group_id) REFERENCES family_groups(group_id) ON DELETE CASCADE,
+    FOREIGN KEY (inviter_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
+    FOREIGN KEY (invited_user_id) REFERENCES users(user_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

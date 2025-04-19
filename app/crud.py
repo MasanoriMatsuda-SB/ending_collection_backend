@@ -3,6 +3,7 @@ from sqlalchemy import desc
 from typing import List, Optional
 from datetime import datetime
 import logging
+import uuid
 
 from app.models import (
     Message,
@@ -11,7 +12,9 @@ from app.models import (
     Category,
     Item,
     ItemImage,
-    Thread
+    Thread,
+    GroupInvite,
+    UserFamilyGroup,
 )
 from app.schemas import (
     MessageCreate,
@@ -277,3 +280,97 @@ def add_item_image(
         db.rollback()
         raise e
 # =====Item関連CRUD(End)=====
+
+# ===== ここから招待機能関連 CRUD を追加 =====
+
+def create_group_invite(
+    db: Session,
+    group_id: int,
+    inviter_user_id: int,
+    expires_at: Optional[datetime] = None
+) -> GroupInvite:
+    """
+    指定グループへの招待を作成。
+    一意のトークンを UUID4 で生成して保存します。
+    """
+    token = str(uuid.uuid4())
+    invite = GroupInvite(
+        group_id=group_id,
+        token=token,
+        inviter_user_id=inviter_user_id,
+        expires_at=expires_at
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+def get_group_invite_by_token(db: Session, token: str) -> Optional[GroupInvite]:
+    """
+    招待トークンに対応する GroupInvite レコードを取得。
+    存在しなければ None。
+    """
+    return db.query(GroupInvite).filter(GroupInvite.token == token).first()
+
+
+def accept_group_invite(
+    db: Session,
+    token: str,
+    invited_user_id: int
+) -> Optional[GroupInvite]:
+    """
+    招待トークンを使って参加を承認。
+    - トークンが存在し、未使用かつ有効期限内なら、
+      UserFamilyGroup に viewer 権限で追加し、
+      invite.used を True、used_at を設定。
+    - それ以外は None を返します。
+    """
+    invite = get_group_invite_by_token(db, token)
+    if not invite:
+        return None
+    # 有効期限チェック
+    if invite.used or (invite.expires_at and invite.expires_at < datetime.utcnow()):
+        return None
+
+    # まだ所属していなければ追加
+    existing = db.query(UserFamilyGroup).filter_by(
+        user_id=invited_user_id,
+        group_id=invite.group_id
+    ).first()
+    if not existing:
+        membership = UserFamilyGroup(
+            user_id=invited_user_id,
+            group_id=invite.group_id,
+            role="viewer"
+        )
+        db.add(membership)
+
+    # 招待レコードを更新
+    invite.used = True
+    invite.used_at = datetime.utcnow()
+    invite.invited_user_id = invited_user_id
+
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+def list_group_invites(db: Session, group_id: int) -> List[GroupInvite]:
+    """
+    指定グループに対するすべての招待レコードを取得。
+    """
+    return db.query(GroupInvite).filter(GroupInvite.group_id == group_id).all()
+
+
+def revoke_group_invite(db: Session, invite_id: int) -> bool:
+    """
+    招待を取り消し（レコード削除）。
+    """
+    count = db.query(GroupInvite).filter(GroupInvite.invite_id == invite_id).delete()
+    if count:
+        db.commit()
+        return True
+    return False
+
+# ===== 招待機能 CRUD ここまで =====

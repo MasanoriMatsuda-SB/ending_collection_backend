@@ -227,3 +227,49 @@ class ThreadCreate(BaseModel):
     item_id: int
 
 # ====== Threads作成関連Schema（End） ====== 
+
+# ====== ここから招待機能関連Schema を追加 ======
+
+class GroupInviteBase(BaseModel):
+    group_id: int
+    expires_at: Optional[datetime] = None
+
+class GroupInviteCreate(GroupInviteBase):
+    """招待作成時のリクエストボディ"""
+    # inviter_user_id はサーバー側で JWT から取得する想定なので不要
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "group_id": 1,
+                "expires_at": "2025-05-01T12:00:00Z"
+            }
+        }
+
+class GroupInviteResponse(BaseModel):
+    invite_id: int
+    group_id: int
+    token: str
+    inviter_user_id: Optional[int]
+    invited_user_id: Optional[int]
+    created_at: datetime
+    expires_at: Optional[datetime]
+    used_at: Optional[datetime]
+    used: bool
+
+    class Config:
+        orm_mode = True
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+
+    class Config:
+        schema_extra = {
+            "example": {"token": "123e4567-e89b-12d3-a456-426614174000"}
+        }
+
+class AcceptInviteResponse(GroupInviteResponse):
+    """招待受諾後に返却されるデータ。GroupInviteResponse と同じフォーマットで問題ありません。"""
+    pass
+
+# ====== 招待機能関連Schema ここまで ======
