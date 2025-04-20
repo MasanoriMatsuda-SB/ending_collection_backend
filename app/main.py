@@ -108,6 +108,16 @@ async def send_message(sid, data):
     logger.info(f"Message from {sid}: {data}")
     await sio.emit("receive_message", data)
 
+@sio.event
+async def new_attachment(sid, data):
+    logger.info(f"添付ファイル通知: {data}")
+    await sio.emit("new_attachment", data)
+
+@sio.on("delete_message")
+async def handle_delete_message(sid, data):
+    logger.info(f"🗑 メッセージ削除: {data}")
+    await sio.emit("delete_message", data)
+
 @sio.on("add_reaction")
 async def handle_add_reaction(sid, data):
     logger.info(f"リアクション追加: {data}")
@@ -381,6 +391,12 @@ def add_reaction(
 ):
     return create_reaction(db, reaction)
 
+#2504201941追加
+@fastapi_app.get("/reactions/batch/by-message-ids")
+def get_reactions_batch(ids: str = Query(...), db: Session = Depends(get_db)):
+    id_list = [int(i) for i in ids.split(",") if i.isdigit()]
+    results = {message_id: get_reactions_by_message(db, message_id) for message_id in id_list}
+    return results
 
 @fastapi_app.get("/reactions/{message_id}", response_model=List[MessageReactionSchema])
 def get_reactions(message_id: int, db: Session = Depends(get_db)):
