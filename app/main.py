@@ -23,6 +23,7 @@ from app.schemas import (
     GroupInviteResponse,
     AcceptInviteRequest,
     AcceptInviteResponse,
+    UserOut, UserUpdate
 )
 from app.utils import (
     get_password_hash, 
@@ -41,7 +42,7 @@ from app.crud import (
     get_group_invite_by_token,
     accept_group_invite,
     list_group_invites,
-    revoke_group_invite,
+    revoke_group_invite,update_user
 )
 import socketio
 
@@ -525,7 +526,7 @@ async def openai_analyze_batch(image_urls: List[str] = Body(...)) -> List[dict]:
                     "content": [
                         {
                             "type": "text",
-                            "text": "画像に最も大きく写っている物の具体的な商品名を、商品名のみで回答してください。"
+                            "text": "画像に最も大きく写っている物の具体的な商品名を提示ください。商品名のみを回答ください。例：大神 (OKAMI) オリジナル・サウンドトラック"
                         },
                         image_dict
                     ]
@@ -973,6 +974,72 @@ def invite_revoke(invite_id: int, db: Session = Depends(get_db)):
     return {"message": "招待を取り消しました"}
 # ===== 招待機能エンドポイントここまで =====
 
+# ===== プロフィール変更機能エンドポイント =====
+@fastapi_app.patch("/users/me", response_model=Token)
+async def patch_current_user(
+    username: str      = Form(None),
+    email: str         = Form(None),
+    password: str      = Form(None),
+    photo: UploadFile  = File(None),
+    db: Session        = Depends(get_db),
+    request: Request   = None
+):
+    # 1. JWT ミドルウェアで request.state.user にペイロードが入っている想定
+    token_data = getattr(request.state, "user", None)
+    if not token_data:
+        raise HTTPException(status_code=401, detail="認証情報がありません")
+    user_id = token_data.get("user_id")
+
+    # 2. 既存ユーザー取得
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="ユーザーが見つかりません")
+
+    # 3. フォーム値で更新
+    if username:
+        user.username = username
+    if email:
+        user.email = email
+    if password:
+        user.password_hash = get_password_hash(password)
+
+    # 4. プロフィール画像アップロード
+    if photo and photo.filename:
+        connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        container_name    = os.getenv("AZURE_CONTAINER_NAME")
+        if not connection_string or not container_name:
+            raise HTTPException(status_code=500, detail="Azure Blob Storage の設定が不十分です")
+        blob_service     = BlobServiceClient.from_connection_string(connection_string)
+        container_client = blob_service.get_container_client(container_name)
+
+        ext = photo.filename.rsplit(".", 1)[-1] if "." in photo.filename else ""
+        blob_name = f"{uuid.uuid4()}.{ext}" if ext else str(uuid.uuid4())
+        blob_client = container_client.get_blob_client(blob_name)
+        file_data = await photo.read()
+        blob_client.upload_blob(
+            file_data,
+            overwrite=True,
+            content_settings=ContentSettings(content_type=photo.content_type)
+        )
+        user.photoURL = blob_client.url
+
+    # 5. コミット＆リフレッシュ
+    db.commit()
+    db.refresh(user)
+
+    # 6. 新しい JWT を発行
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    new_token = create_access_token(
+        data={
+            "sub":      user.username,
+            "user_id":  user.user_id,
+            "email":    user.email,
+            "photoURL": user.photoURL
+        },
+        expires_delta=access_token_expires
+    )
+    return {"access_token": new_token, "token_type": "bearer"}
+# ===== プロフィール変更機能エンドポイントここまで =====
 
 #  起動ポイント変更
 

@@ -4,6 +4,8 @@ from typing import List, Optional
 from datetime import datetime
 import logging
 import uuid
+import os
+from azure.storage.blob import BlobServiceClient, ContentSettings
 
 from app.models import (
     Message,
@@ -15,6 +17,7 @@ from app.models import (
     Thread,
     GroupInvite,
     UserFamilyGroup,
+    User
 )
 from app.schemas import (
     MessageCreate,
@@ -25,6 +28,8 @@ from app.schemas import (
     ThreadCreate
 )
 from app.services.blob import delete_blob_by_url
+
+from app.utils import get_password_hash
 
 # ロガーの設定
 logger = logging.getLogger(__name__)
@@ -374,3 +379,46 @@ def revoke_group_invite(db: Session, invite_id: int) -> bool:
     return False
 
 # ===== 招待機能 CRUD ここまで =====
+
+# ===== ここからプロフィール変更関連 CRUD を追加 =====
+def update_user(
+    db: Session,
+    user_id: int,
+    username: str | None = None,
+    email: str | None = None,
+    password: str | None = None,
+    photo_file: bytes | None = None,
+    photo_content_type: str | None = None
+) -> User:
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        return None
+
+    # ユーザー名／メール
+    if username:
+        user.username = username
+    if email:
+        user.email = email
+
+    # パスワード
+    if password:
+        user.password_hash = get_password_hash(password)
+
+    # プロフィール画像
+    if photo_file is not None and photo_content_type:
+        connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        container_name    = os.getenv("AZURE_CONTAINER_NAME")
+        blob_service      = BlobServiceClient.from_connection_string(connection_string)
+        container_client  = blob_service.get_container_client(container_name)
+        # ファイル名を一意に
+        ext = photo_content_type.split("/")[-1]
+        blob_name = f"profile-{user_id}/{uuid.uuid4()}.{ext}"
+        blob = container_client.get_blob_client(blob_name)
+        blob.upload_blob(photo_file, overwrite=True,
+                         content_settings=ContentSettings(content_type=photo_content_type))
+        user.photoURL = blob.url
+
+    db.commit()
+    db.refresh(user)
+    return user
+# ===== プロフィール変更関連 CRUD ここまで =====

@@ -273,3 +273,10 @@ class AcceptInviteResponse(GroupInviteResponse):
     pass
 
 # ====== 招待機能関連Schema ここまで ======
+
+# ====== プロフィール設定関連Schema ======
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+# ====== プロフィール設定関連Schema ======
